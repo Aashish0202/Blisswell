@@ -76,8 +76,7 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
       if (siteLogo.startsWith('http')) {
         return siteLogo;
       }
-      // const baseUrl = (process.env.REACT_APP_API_URL || 'http://localhost:5000/api').replace('/api', '');
-    const baseUrl = (process.env.REACT_APP_API_URL).replace('/api', '');
+      const baseUrl = (process.env.REACT_APP_API_URL || 'http://localhost:5000/api').replace('/api', '');
       return `${baseUrl}${siteLogo}`;
     }
     return null;

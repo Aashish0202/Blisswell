@@ -12,7 +12,7 @@ const initSalaryCron = () => {
 
     // Schedule cron job
     cron.schedule(`5 0 ${closingDay} * *`, async () => {
-      console.log(`Running monthly salary closing on day ${closingDay}`);
+      console.log(`Running sales incentive closing on day ${closingDay}`);
       const result = await salaryController.runMonthlyClosing();
       console.log('Closing result:', result);
     }, {

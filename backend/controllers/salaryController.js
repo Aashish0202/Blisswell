@@ -6,7 +6,7 @@ const Settings = require('../models/Settings');
 
 // Monthly salary closing process
 exports.runMonthlyClosing = async () => {
-  console.log('Starting monthly salary closing...');
+  console.log('Starting sales incentive closing...');
 
   try {
     const settings = await Settings.getPackageSettings();
@@ -64,7 +64,7 @@ exports.runMonthlyClosing = async () => {
       }
     }
 
-    console.log('Monthly salary closing completed');
+    console.log('Sales Incentive closing completed');
     return { success: true, processed: activeCycles.length };
   } catch (error) {
     console.error('Monthly closing error:', error);

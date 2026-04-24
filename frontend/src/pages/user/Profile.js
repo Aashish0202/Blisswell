@@ -139,7 +139,28 @@ const Profile = () => {
     setProfileLoading(true);
 
     try {
-      await userAPI.updateProfile(formData);
+      // Only send fields that are editable (not locked by admin)
+      const updateData = {
+        state: formData.state,
+        address: formData.address
+      };
+
+      // Only include name if it's not already set (not locked)
+      if (!profileData.name || profileData.name.trim() === '') {
+        updateData.name = formData.name;
+      }
+
+      // Only include mobile if it's not already set (not locked)
+      if (!profileData.mobile || profileData.mobile.trim() === '') {
+        updateData.mobile = formData.mobile;
+      }
+
+      // Only include pan_number if it's not already set (not locked)
+      if (!profileData.pan_number || profileData.pan_number.trim() === '') {
+        updateData.pan_number = formData.pan_number;
+      }
+
+      await userAPI.updateProfile(updateData);
       toast.success('Profile updated successfully');
       dispatch(loadUser());
       fetchProfile();
@@ -309,8 +330,15 @@ const Profile = () => {
                     className="form-input"
                     value={formData.name}
                     onChange={handleProfileChange}
+                    disabled={profileData.name && profileData.name.trim() !== ''}
+                    style={profileData.name && profileData.name.trim() !== '' ? { background: '#f3f4f6', cursor: 'not-allowed' } : {}}
                     required
                   />
+                  {profileData.name && profileData.name.trim() !== '' && (
+                    <small className="form-hint" style={{ color: 'var(--accent-600)' }}>
+                      🔒 Name is set by admin and cannot be changed. Contact support for corrections.
+                    </small>
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="form-label">Email Address</label>
@@ -336,8 +364,15 @@ const Profile = () => {
                     onChange={handleProfileChange}
                     pattern="[0-9]{10}"
                     title="Please enter a valid 10-digit mobile number"
+                    disabled={profileData.mobile && profileData.mobile.trim() !== ''}
+                    style={profileData.mobile && profileData.mobile.trim() !== '' ? { background: '#f3f4f6', cursor: 'not-allowed' } : {}}
                     required
                   />
+                  {profileData.mobile && profileData.mobile.trim() !== '' && (
+                    <small className="form-hint" style={{ color: 'var(--accent-600)' }}>
+                      🔒 Mobile number is set by admin and cannot be changed. Contact support for corrections.
+                    </small>
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="form-label">PAN Number</label>

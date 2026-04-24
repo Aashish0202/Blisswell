@@ -56,9 +56,7 @@ const Home = () => {
   const getImageUrl = (image) => {
     if (!image) return null;
     if (image.startsWith('http')) return image;
-    // const baseUrl = (process.env.REACT_APP_API_URL || 'http://localhost:5000/api').replace('/api', '');
-      const baseUrl = (process.env.REACT_APP_API_URL).replace('/api', '');
-
+    const baseUrl = (process.env.REACT_APP_API_URL || 'http://localhost:5000/api').replace('/api', '');
     return `${baseUrl}${image}`;
   };
 
@@ -157,16 +155,7 @@ const Home = () => {
 
               {/* Main Image */}
               <div className="product-image-wrapper">
-                {products[0]?.image ? (
-                  <img src={getImageUrl(products[0].image)} alt="Premium Bedsheet" />
-                ) : heroImage ? (
-                  <img src={getImageUrl(heroImage)} alt="Premium Bedsheet" />
-                ) : (
-                  <div className="product-placeholder">
-                    <span className="placeholder-icon">✦</span>
-                    <span className="placeholder-text">Premium Collection</span>
-                  </div>
-                )}
+                <img src="/hero.png" alt="Premium Bedsheet" />
                 <div className="image-glow"></div>
               </div>
 

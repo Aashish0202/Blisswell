@@ -128,6 +128,44 @@ const User = {
     );
   },
 
+  // Update password with reset token
+  async updatePasswordWithToken(id, password, resetToken, resetTokenExpires) {
+    await pool.execute(
+      'UPDATE users SET password = ?, reset_token = ?, reset_token_expires = ? WHERE id = ?',
+      [password, resetToken, resetTokenExpires, id]
+    );
+  },
+
+  // Set reset token
+  async setResetToken(email, resetToken, resetTokenExpires) {
+    // resetTokenExpires is already in IST format (YYYY-MM-DD HH:MM:SS)
+    await pool.execute(
+      'UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE email = ?',
+      [resetToken, resetTokenExpires, email]
+    );
+  },
+
+  // Find user by reset token
+  async findByResetToken(token) {
+    // Get current time in UTC format (same format as stored in database)
+    const now = new Date();
+    const currentTimeUTC = now.toISOString().slice(0, 19).replace('T', ' ');
+
+    const [rows] = await pool.execute(
+      'SELECT * FROM users WHERE reset_token = ? AND reset_token_expires > ?',
+      [token, currentTimeUTC]
+    );
+    return rows[0];
+  },
+
+  // Clear reset token
+  async clearResetToken(id) {
+    await pool.execute(
+      'UPDATE users SET reset_token = NULL, reset_token_expires = NULL WHERE id = ?',
+      [id]
+    );
+  },
+
   // Approve PAN
   async approvePAN(id) {
     await pool.execute(

@@ -32,7 +32,7 @@ const About = () => {
   const getImageUrl = (image) => {
     if (!image) return null;
     if (image.startsWith('http')) return image;
-    const baseUrl = (process.env.REACT_APP_API_URL).replace('/api', '');
+    const baseUrl = (process.env.REACT_APP_API_URL || 'http://localhost:5000/api').replace('/api', '');
     return `${baseUrl}${image}`;
   };
 

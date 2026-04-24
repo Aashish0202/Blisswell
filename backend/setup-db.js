@@ -167,7 +167,7 @@ async function setupDatabase() {
     await connection.query(`
       INSERT INTO settings (setting_key, setting_value, description) VALUES
       ('package_price', '2100', 'Default package price'),
-      ('salary_amount', '100', 'Monthly salary amount per referral'),
+      ('salary_amount', '100', 'Sales Incentive amount per referral'),
       ('salary_duration', '12', 'Number of months for salary payout'),
       ('closing_day', '5', 'Day of month for salary closing'),
       ('repurchase_enabled', 'true', 'Allow repurchase of package'),

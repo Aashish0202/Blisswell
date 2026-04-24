@@ -250,7 +250,7 @@ const Orders = () => {
                         </div>
                         <div className="benefit-details">
                           <div className="benefit-row">
-                            <span className="benefit-label">Monthly Salary</span>
+                            <span className="benefit-label">Sales Incentive</span>
                             <span className="benefit-value">₹{salaryAmount.toLocaleString()}/mo</span>
                           </div>
                           <div className="benefit-row">

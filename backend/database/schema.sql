@@ -16,12 +16,15 @@ CREATE TABLE IF NOT EXISTS users (
   has_active_package BOOLEAN DEFAULT FALSE,
   is_active BOOLEAN DEFAULT TRUE,
   role ENUM('user', 'admin') DEFAULT 'user',
+  reset_token VARCHAR(255) DEFAULT NULL,
+  reset_token_expires TIMESTAMP NULL DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (referred_by) REFERENCES users(id) ON DELETE SET NULL,
   INDEX idx_email (email),
   INDEX idx_referral_code (referral_code),
-  INDEX idx_pan (pan_number)
+  INDEX idx_pan (pan_number),
+  INDEX idx_reset_token (reset_token)
 );
 
 -- Wallets table
@@ -162,7 +165,7 @@ CREATE TABLE IF NOT EXISTS banners (
 -- Insert default settings
 INSERT INTO settings (setting_key, setting_value, description) VALUES
 ('package_price', '2100', 'Default package price'),
-('salary_amount', '100', 'Monthly salary amount per referral'),
+('salary_amount', '100', 'Sales Incentive amount per referral'),
 ('salary_duration', '12', 'Number of months for salary payout'),
 ('closing_day', '5', 'Day of month for salary closing'),
 ('repurchase_enabled', 'true', 'Allow repurchase of package')

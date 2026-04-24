@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
@@ -262,5 +263,136 @@ exports.changePassword = async (req, res) => {
   } catch (error) {
     console.error('Change password error:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Forgot password - request reset
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    console.log('Forgot password request for:', email);
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required' });
+    }
+
+    // Find user by email
+    const user = await User.findByEmail(email.toLowerCase().trim());
+    if (!user) {
+      // For security, don't reveal whether email exists or not
+      console.log('No user found with email:', email);
+      return res.json({ message: 'If an account with this email exists, a password reset link has been sent.' });
+    }
+
+    console.log('User found:', user.id, user.name);
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+
+    // Set expiry to 1 hour from now (stored in UTC)
+    const expiresAt = new Date(Date.now() + 3600000); // 1 hour from now
+    const resetTokenExpires = expiresAt.toISOString().slice(0, 19).replace('T', ' ');
+
+    console.log('Generated reset token for user:', user.id, '- Expires at:', resetTokenExpires);
+
+    // Save token to database
+    try {
+      await User.setResetToken(user.email, resetToken, resetTokenExpires);
+      console.log('Reset token saved to database');
+    } catch (dbError) {
+      console.error('Error saving reset token:', dbError);
+      // Continue anyway - for security, don't reveal the error
+    }
+
+    // Send reset email
+    const siteUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const resetUrl = `${siteUrl}/reset-password/${resetToken}`;
+
+    console.log('Attempting to send reset email to:', user.email);
+
+    try {
+      const emailResult = await emailService.sendPasswordResetEmail({
+        name: user.name,
+        email: user.email,
+        resetUrl,
+        siteName: process.env.SITE_NAME || 'Blisswell'
+      });
+      console.log('Email send result:', emailResult);
+    } catch (emailError) {
+      console.error('Error sending reset email:', emailError);
+      // Don't throw - return success for security
+    }
+
+    res.json({ message: 'If an account with this email exists, a password reset link has been sent.' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Reset password with token
+exports.resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    console.log('Reset password request for token:', token);
+
+    if (!token) {
+      return res.status(400).json({ message: 'Reset token is required' });
+    }
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    }
+
+    // Find user by valid reset token
+    const user = await User.findByResetToken(token);
+    console.log('User found for reset:', user ? user.id : 'none');
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired reset token' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Update password and clear reset token
+    await User.updatePassword(user.id, hashedPassword);
+    await User.clearResetToken(user.id);
+
+    console.log('Password reset successfully for user:', user.id);
+
+    res.json({ message: 'Password has been reset successfully. You can now login with your new password.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Validate reset token
+exports.validateResetToken = async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    console.log('Validating reset token:', token);
+
+    if (!token) {
+      return res.status(400).json({ valid: false, message: 'Reset token is required' });
+    }
+
+    // Find user by valid reset token
+    const user = await User.findByResetToken(token);
+    console.log('User found for token:', user ? user.id : 'none');
+
+    if (!user) {
+      return res.json({ valid: false, message: 'Invalid or expired reset token' });
+    }
+
+    res.json({ valid: true, message: 'Token is valid' });
+  } catch (error) {
+    console.error('Validate reset token error:', error);
+    res.status(500).json({ valid: false, message: 'Server error' });
   }
 };

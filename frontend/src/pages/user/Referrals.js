@@ -176,8 +176,8 @@ const Referrals = () => {
             <div className="step">
               <div className="step-number">3</div>
               <div className="step-content">
-                <h4>Earn ₹100/Month</h4>
-                <p>Get ₹100 every month for 12 months per active referral</p>
+                <h4>Earn Monthly Income</h4>
+                <p>Earn Monthly rewards for each active referral</p>
               </div>
             </div>
           </div>

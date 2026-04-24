@@ -240,6 +240,27 @@ const DataTable = ({
           vertical-align: middle;
         }
 
+        /* Sticky actions column */
+        .data-table th.sticky-actions,
+        .data-table td.sticky-actions {
+          position: sticky;
+          right: 0;
+          background: inherit;
+          z-index: 10;
+        }
+
+        .data-table tr:hover td.sticky-actions {
+          background: var(--gray-50);
+        }
+
+        .data-table tr.selected td.sticky-actions {
+          background: var(--primary-50);
+        }
+
+        .data-table th.sticky-actions {
+          background: var(--gray-50);
+        }
+
         .data-table tbody tr {
           transition: background var(--transition-fast);
         }

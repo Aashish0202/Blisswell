@@ -122,7 +122,7 @@ const Incentive = () => {
           <div className="info-icon">💡</div>
           <div className="info-content">
             <strong>How Incentive Works</strong>
-            <p>For each active referral, you earn ₹100/month for 12 months. Cycles start when your referral purchases a package.</p>
+            <p>For each active Refferal , you earn 6%/ month for 6 months  on product sell. Cycles start when your Refferal purchases a product.</p>
           </div>
         </div>
 

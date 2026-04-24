@@ -25,6 +25,9 @@ router.post('/register', registerValidation, authController.register);
 router.post('/login', loginValidation, authController.login);
 router.get('/validate-referral/:code', authController.validateReferralCode);
 router.get('/validate-pan/:pan', authController.validatePAN);
+router.post('/forgot-password', authController.forgotPassword);
+router.get('/validate-reset-token/:token', authController.validateResetToken);
+router.post('/reset-password/:token', authController.resetPassword);
 
 // Protected routes
 router.get('/me', verifyToken, authController.getMe);

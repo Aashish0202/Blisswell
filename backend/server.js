@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 // Import routes
@@ -62,11 +63,15 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Serve static files from uploads directory
+// Serve static files from uploads directory with CORS headers
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
-  maxAge: '1d' // Static files can be cached
+  maxAge: '1d',
+  setHeaders: (res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  }
 }));
-
 // Apply rate limiting to API routes
 app.use('/api/', limiter);
 
@@ -96,6 +101,54 @@ app.get('/api/settings/site', async (req, res) => {
   } catch (error) {
     console.error('Get site settings error:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Image proxy endpoint - returns image as base64 (bypasses CORS)
+app.get('/api/image-base64', (req, res) => {
+  try {
+    const imagePath = req.query.path;
+    console.log('Image proxy request:', imagePath);
+
+    if (!imagePath) {
+      return res.status(400).json({ error: 'Image path required' });
+    }
+
+    // Security: only allow paths starting with /uploads/
+    if (!imagePath.startsWith('/uploads/')) {
+      return res.status(403).json({ error: 'Invalid path' });
+    }
+
+    // Normalize path for Windows (remove leading slash and convert forward slashes)
+    const normalizedPath = imagePath.replace(/^\//, '').replace(/\//g, path.sep);
+    const fullPath = path.join(__dirname, normalizedPath);
+    console.log('Full path:', fullPath);
+
+    // Check if file exists
+    if (!fs.existsSync(fullPath)) {
+      console.log('File not found at:', fullPath);
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    // Read file and convert to base64
+    const fileBuffer = fs.readFileSync(fullPath);
+    const ext = path.extname(fullPath).toLowerCase();
+    const mimeTypes = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.svg': 'image/svg+xml',
+      '.webp': 'image/webp'
+    };
+    const mimeType = mimeTypes[ext] || 'application/octet-stream';
+    const base64 = fileBuffer.toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+
+    res.json({ dataUrl });
+  } catch (error) {
+    console.error('Image proxy error:', error);
+    res.status(500).json({ error: 'Failed to process image' });
   }
 });
 

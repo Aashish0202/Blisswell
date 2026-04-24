@@ -28,6 +28,8 @@ import ShippingPolicy from './pages/ShippingPolicy';
 import GrievanceRedressal from './pages/GrievanceRedressal';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import ChangePassword from './pages/ChangePassword';
 import UserDashboard from './pages/user/Dashboard';
 import Wallet from './pages/user/Wallet';
@@ -49,6 +51,7 @@ import AdminTickets from './pages/admin/Tickets';
 import AdminGallery from './pages/admin/Gallery';
 import AdminBonus from './pages/admin/Bonus';
 import NotFound from './pages/NotFound';
+import ImageTest from './pages/user/ImageTest';
 
 // Admin icon component for bonus
 
@@ -120,6 +123,9 @@ function App() {
                   <Route path="/grievance-redressal" element={<GrievanceRedressal />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/register" element={<Register />} />
+                  <Route path="/forgot-password" element={<ForgotPassword />} />
+                  <Route path="/reset-password/:token" element={<ResetPassword />} />
+                  <Route path="/image-test" element={<ImageTest />} />
 
                   {/* User Protected Routes */}
                   <Route path="/dashboard" element={
