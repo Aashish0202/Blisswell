@@ -16,11 +16,16 @@ exports.register = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { name, email, mobile, state, password, pan_number, ref, terms_accepted } = req.body;
+    const { name, email, mobile, state, address, password, pan_number, ref, terms_accepted } = req.body;
 
     // Check if terms are accepted
     if (!terms_accepted) {
       return res.status(400).json({ message: 'You must accept the terms and conditions to register' });
+    }
+
+    // Check if address is provided
+    if (!address || address.trim() === '') {
+      return res.status(400).json({ message: 'Address is required' });
     }
 
     // Check if email already exists
@@ -61,6 +66,7 @@ exports.register = async (req, res) => {
     // Create user with PAN
     const userId = await User.create({
       state,
+      address,
       name,
       email,
       mobile,

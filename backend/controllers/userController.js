@@ -139,6 +139,8 @@ exports.getProfile = async (req, res) => {
         address: user.address || '',
         pan_number: user.pan_number,
         pan_status: user.pan_status,
+        gst_number: user.gst_number || '',
+        gst_status: user.gst_status || null,
         referral_code: user.referral_code,
         has_active_package: user.has_active_package,
         profile_image: user.profile_image || null,
@@ -167,7 +169,7 @@ exports.getProfile = async (req, res) => {
 // Update user profile
 exports.updateProfile = async (req, res) => {
   try {
-    const { name, mobile, pan_number, state, address } = req.body;
+    const { name, mobile, pan_number, state, address, gst_number } = req.body;
 
     // Get current user to check existing PAN
     const currentUser = await User.findById(req.user.id);
@@ -175,7 +177,15 @@ exports.updateProfile = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const updateData = { name, mobile };
+    const updateData = {};
+
+    // Only include name and mobile if provided
+    if (name !== undefined) {
+      updateData.name = name;
+    }
+    if (mobile !== undefined) {
+      updateData.mobile = mobile;
+    }
 
     // Update state and address if provided
     if (state !== undefined) {
@@ -183,6 +193,27 @@ exports.updateProfile = async (req, res) => {
     }
     if (address !== undefined) {
       updateData.address = address;
+    }
+
+    // Update GST number if provided
+    if (gst_number !== undefined) {
+      // Check if user already has GST number set
+      if (currentUser.gst_number && currentUser.gst_number.trim() !== '') {
+        // User already has GST - don't update it
+        console.log('GST already exists, skipping GST update');
+      } else {
+        // Validate GST format (optional - can be empty)
+        if (gst_number && gst_number.trim() !== '') {
+          const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+          if (!gstRegex.test(gst_number.toUpperCase())) {
+            return res.status(400).json({ message: 'Invalid GST number format. Example: 27ANJPC4891P1ZB' });
+          }
+          updateData.gst_number = gst_number.toUpperCase();
+          updateData.gst_status = 'approved'; // Auto-approve GST
+        } else {
+          updateData.gst_number = null;
+        }
+      }
     }
 
     // PAN handling - only process if provided and not empty

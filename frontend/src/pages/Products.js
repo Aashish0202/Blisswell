@@ -1,13 +1,56 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../utils/api';
 import { useSiteSettings } from '../components/SiteSettingsProvider';
+import PurchaseModal from '../components/PurchaseModal';
+
+// Image Slider Component for products with multiple images
+const ImageSlider = ({ images, getImageUrl, alt }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (images && images.length > 1) {
+      intervalRef.current = setInterval(() => {
+        setCurrentIndex((prev) => (prev + 1) % images.length);
+      }, 2000);
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [images]);
+
+  if (!images || images.length === 0) return null;
+
+  return (
+    <div className="image-slider">
+      <img
+        src={getImageUrl(images[currentIndex])}
+        alt={alt}
+        onError={(e) => { e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><text x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="40">✦</text></svg>' }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'opacity 0.3s ease' }}
+      />
+      {images.length > 1 && (
+        <div className="slider-dots">
+          {images.map((_, idx) => (
+            <span key={idx} className={`dot ${idx === currentIndex ? 'active' : ''}`}></span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Products = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isVisible, setIsVisible] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const { siteName } = useSiteSettings();
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchProducts();
@@ -17,6 +60,11 @@ const Products = () => {
   const fetchProducts = async () => {
     try {
       const response = await orderAPI.getProducts();
+      console.log('API URL:', process.env.REACT_APP_API_URL);
+      console.log('Products response:', response.data);
+      response.data?.products?.forEach(p => {
+        console.log(`Product: ${p.name}, images:`, p.images, 'type:', typeof p.images);
+      });
       setProducts(response.data?.products || []);
     } catch (error) {
       console.error('Failed to fetch products:', error);
@@ -25,11 +73,58 @@ const Products = () => {
     }
   };
 
+  const handleBuyNow = (product) => {
+    // Check if user is logged in
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/register');
+      return;
+    }
+    setSelectedProduct(product);
+    setShowPurchaseModal(true);
+  };
+
+  const handlePurchaseSuccess = (orderData) => {
+    setShowPurchaseModal(false);
+    setSelectedProduct(null);
+    // Navigate to orders page
+    navigate('/user/orders');
+  };
+
   const getImageUrl = (image) => {
     if (!image) return null;
     if (image.startsWith('http')) return image;
     const baseUrl = (process.env.REACT_APP_API_URL || 'http://localhost:5000/api').replace('/api', '');
     return `${baseUrl}${image}`;
+  };
+
+  const getProductImages = (product) => {
+    // Handle both new images array and legacy single image
+    if (product.images) {
+      // If it's already an array
+      if (Array.isArray(product.images) && product.images.length > 0) {
+        console.log(`Product ${product.name}: Found ${product.images.length} images`);
+        return product.images;
+      }
+      // If it's a JSON string, parse it
+      if (typeof product.images === 'string') {
+        try {
+          const parsed = JSON.parse(product.images);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            console.log(`Product ${product.name}: Parsed ${parsed.length} images from string`);
+            return parsed;
+          }
+        } catch (e) {
+          console.error('Failed to parse images:', e);
+        }
+      }
+    }
+    if (product.image) {
+      console.log(`Product ${product.name}: Using single image fallback`);
+      return [product.image];
+    }
+    console.log(`Product ${product.name}: No images found`);
+    return [];
   };
 
   return (
@@ -91,11 +186,18 @@ const Products = () => {
           ) : products.length > 0 ? (
             <div className="products-grid">
               {products.map((product, index) => {
+                const productImages = getProductImages(product);
+                const hasMultipleImages = productImages.length > 1;
+                console.log(`Rendering ${product.name}: ${productImages.length} images, hasMultiple: ${hasMultipleImages}`);
                 return (
                   <div key={product.id} className="product-card">
                     <div className="product-image-container">
-                      {product.image ? (
-                        <img src={getImageUrl(product.image)} alt={product.name} />
+                      {productImages.length > 0 ? (
+                        hasMultipleImages ? (
+                          <ImageSlider images={productImages} getImageUrl={getImageUrl} alt={product.name} />
+                        ) : (
+                          <img src={getImageUrl(productImages[0])} alt={product.name} />
+                        )
                       ) : (
                         <div className="product-placeholder">
                           <span>✦</span>
@@ -129,12 +231,12 @@ const Products = () => {
                           <span className="current-price">₹{parseFloat(product.price).toLocaleString()}</span>
                           <span className="price-note">Inclusive of taxes</span>
                         </div>
-                        <Link to="/register" className="btn-add-to-cart">
-                          <span>Add to Cart</span>
+                        <button className="btn-add-to-cart" onClick={() => handleBuyNow(product)}>
+                          <span>Buy Now</span>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M5 12h14M12 5l7 7-7 7"/>
                           </svg>
-                        </Link>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -173,7 +275,7 @@ const Products = () => {
                 </svg>
               </div>
               <h3>Free Shipping</h3>
-              <p>Free delivery on all orders above ₹999</p>
+              <p>Free delivery on all orders</p>
             </div>
             <div className="feature-card">
               <div className="feature-icon">
@@ -421,7 +523,7 @@ const Products = () => {
 
         .product-image-container {
           position: relative;
-          aspect-ratio: 4/3;
+          aspect-ratio: 1/1;
           background: #f5f5f5;
           overflow: hidden;
         }
@@ -539,7 +641,7 @@ const Products = () => {
         }
 
         .product-content {
-          padding: 1.5rem;
+          padding: 1rem;
         }
 
         .product-category {
@@ -548,11 +650,11 @@ const Products = () => {
           color: #2563eb;
           text-transform: uppercase;
           letter-spacing: 0.05em;
-          margin-bottom: 0.5rem;
+          margin-bottom: 0.25rem;
         }
 
         .product-name {
-          font-size: 1.25rem;
+          font-size: 1.125rem;
           font-weight: 600;
           color: #0a0a0a;
           margin: 0 0 0.5rem 0;
@@ -835,6 +937,37 @@ const Products = () => {
           border-color: #fff;
         }
 
+        /* Image Slider Styles */
+        .image-slider {
+          width: 100%;
+          height: 100%;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .slider-dots {
+          position: absolute;
+          bottom: 8px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 6px;
+          z-index: 10;
+        }
+
+        .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.5);
+          transition: all 0.3s ease;
+        }
+
+        .dot.active {
+          background: white;
+          transform: scale(1.2);
+        }
+
         /* Responsive */
         @media (max-width: 1024px) {
           .features-grid {
@@ -880,6 +1013,17 @@ const Products = () => {
           }
         }
       `}</style>
+
+      {/* Purchase Modal */}
+      <PurchaseModal
+        isOpen={showPurchaseModal}
+        onClose={() => {
+          setShowPurchaseModal(false);
+          setSelectedProduct(null);
+        }}
+        product={selectedProduct}
+        onSuccess={handlePurchaseSuccess}
+      />
     </div>
   );
 };

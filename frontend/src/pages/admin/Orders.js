@@ -16,16 +16,21 @@ const AdminOrders = () => {
 
   useEffect(() => {
     fetchOrders();
-  }, [page]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, filters.status]);
 
   const fetchOrders = async () => {
     setLoading(true);
     try {
+      console.log('[Admin Orders] Fetching orders...', { page, filters });
       const response = await adminAPI.getOrders(page, filters);
-      setOrders(response.data.orders);
-      setTotalPages(response.data.pages);
+      console.log('[Admin Orders] Response:', response.data);
+      setOrders(response.data.orders || []);
+      setTotalPages(response.data.pages || 1);
     } catch (error) {
-      toast.error('Failed to load orders');
+      console.error('[Admin Orders] Error:', error);
+      console.error('[Admin Orders] Error response:', error.response?.data);
+      toast.error(error.response?.data?.message || 'Failed to load orders');
     } finally {
       setLoading(false);
     }
@@ -47,13 +52,10 @@ const AdminOrders = () => {
     }
   };
 
-  const statuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled'];
+  // Only show these statuses - exclude processing and failed
+  const statuses = ['pending', 'shipped', 'delivered', 'cancelled'];
 
-  // Calculate pending orders for alert
-  const pendingOrders = orders.filter(o => o.status === 'pending' || o.status === 'processing').length;
-  const alerts = pendingOrders > 0 ? [
-    { label: 'Pending Orders', count: pendingOrders, href: '/admin/orders?status=pending', variant: 'warning' }
-  ] : [];
+  // No processing orders alert needed since we hide them
 
   const getImageUrl = (image) => {
     if (!image) return null;
@@ -109,7 +111,9 @@ const AdminOrders = () => {
         <span className={`badge badge-${
           value === 'delivered' ? 'success' :
           value === 'cancelled' ? 'danger' :
-          value === 'shipped' ? 'info' : 'warning'
+          value === 'failed' ? 'danger' :
+          value === 'shipped' ? 'info' :
+          value === 'pending' ? 'secondary' : 'warning'
         }`}>
           {value}
         </span>
@@ -129,7 +133,10 @@ const AdminOrders = () => {
           value={row.status}
           onChange={(e) => updateStatus(row.id, e.target.value)}
         >
-          {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+          <option value="pending">pending</option>
+          <option value="shipped">shipped</option>
+          <option value="delivered">delivered</option>
+          <option value="cancelled">cancelled</option>
         </select>
       )
     }
@@ -148,7 +155,7 @@ const AdminOrders = () => {
 
   if (loading && orders.length === 0) {
     return (
-      <AdminLayout alerts={alerts}>
+      <AdminLayout>
         <div className="admin-orders-page">
           <div className="page-header">
             <div>
@@ -162,7 +169,7 @@ const AdminOrders = () => {
   }
 
   return (
-    <AdminLayout alerts={alerts}>
+    <AdminLayout>
       <div className="admin-orders-page">
         {/* Page Header */}
         <div className="page-header">
@@ -196,7 +203,10 @@ const AdminOrders = () => {
               onChange={(e) => setFilters({ ...filters, status: e.target.value })}
             >
               <option value="">All Status</option>
-              {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+              <option value="pending">pending</option>
+              <option value="shipped">shipped</option>
+              <option value="delivered">delivered</option>
+              <option value="cancelled">cancelled</option>
             </select>
             <button type="submit" className="btn btn-primary">Filter</button>
             {(filters.search || filters.status) && (
@@ -206,7 +216,6 @@ const AdminOrders = () => {
                 onClick={() => {
                   setFilters({ status: '', search: '' });
                   setPage(1);
-                  setTimeout(fetchOrders, 0);
                 }}
               >
                 Clear

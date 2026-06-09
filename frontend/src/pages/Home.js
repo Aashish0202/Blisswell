@@ -1,7 +1,47 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { orderAPI, galleryAPI } from '../utils/api';
 import { useSiteSettings } from '../components/SiteSettingsProvider';
+import PurchaseModal from '../components/PurchaseModal';
+
+// Image Slider Component for products with multiple images
+const ImageSlider = ({ images, getImageUrl, alt }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (images && images.length > 1) {
+      intervalRef.current = setInterval(() => {
+        setCurrentIndex((prev) => (prev + 1) % images.length);
+      }, 4000);
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [images]);
+
+  if (!images || images.length === 0) return null;
+
+  return (
+    <div className="image-slider">
+      <img
+        src={getImageUrl(images[currentIndex])}
+        alt={alt}
+        onError={(e) => { e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><text x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="40">🛏️</text></svg>' }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'opacity 0.3s ease' }}
+      />
+      {images.length > 1 && (
+        <div className="slider-dots">
+          {images.map((_, idx) => (
+            <span key={idx} className={`dot ${idx === currentIndex ? 'active' : ''}`}></span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Home = () => {
   const [products, setProducts] = useState([]);
@@ -9,7 +49,10 @@ const Home = () => {
   const [whyImage, setWhyImage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isVisible, setIsVisible] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const { siteName, siteLogo, siteTagline } = useSiteSettings();
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchProducts();
@@ -21,7 +64,11 @@ const Home = () => {
   const fetchProducts = async () => {
     try {
       const response = await orderAPI.getProducts();
-      console.log(response.data)
+      console.log('Products data:', response.data?.products);
+      // Debug: Log images for each product
+      response.data?.products?.forEach(p => {
+        console.log(`Product ${p.name}:`, { image: p.image, images: p.images, imagesType: typeof p.images });
+      });
       setProducts(response.data?.products || []);
     } catch (error) {
       console.error('Failed to fetch products:', error);
@@ -58,6 +105,53 @@ const Home = () => {
     if (image.startsWith('http')) return image;
     const baseUrl = (process.env.REACT_APP_API_URL || 'http://localhost:5000/api').replace('/api', '');
     return `${baseUrl}${image}`;
+  };
+
+  const getProductImages = (product) => {
+    // Handle both new images array and legacy single image
+    if (product.images) {
+      // If it's already an array
+      if (Array.isArray(product.images) && product.images.length > 0) {
+        console.log(`Product ${product.name}: Found ${product.images.length} images`);
+        return product.images;
+      }
+      // If it's a JSON string, parse it
+      if (typeof product.images === 'string') {
+        try {
+          const parsed = JSON.parse(product.images);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            console.log(`Product ${product.name}: Parsed ${parsed.length} images from string`);
+            return parsed;
+          }
+        } catch (e) {
+          console.error('Failed to parse images:', e);
+        }
+      }
+    }
+    if (product.image) {
+      console.log(`Product ${product.name}: Using single image fallback`);
+      return [product.image];
+    }
+    console.log(`Product ${product.name}: No images found`);
+    return [];
+  };
+
+  const handleBuyNow = (product) => {
+    // Check if user is logged in
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/register');
+      return;
+    }
+    setSelectedProduct(product);
+    setShowPurchaseModal(true);
+  };
+
+  const handlePurchaseSuccess = (orderData) => {
+    setShowPurchaseModal(false);
+    setSelectedProduct(null);
+    // Navigate to orders page
+    navigate('/user/orders');
   };
 
   return (
@@ -175,7 +269,7 @@ const Home = () => {
             </div>
             <div className="feature-content">
               <strong>Premium Shipping</strong>
-              <span>Free on orders above ₹999</span>
+              <span>Free on orders</span>
             </div>
           </div>
           <div className="feature-divider"></div>
@@ -235,11 +329,17 @@ const Home = () => {
           ) : products.length > 0 ? (
             <div className="products-grid">
               {products.map((product, index) => {
+                const productImages = getProductImages(product);
+                const hasMultipleImages = productImages.length > 1;
                 return (
                   <div key={product.id} className="product-card">
                     <div className="product-image-container">
-                      {product.image ? (
-                        <img src={getImageUrl(product.image)} alt={product.name} />
+                      {productImages.length > 0 ? (
+                        hasMultipleImages ? (
+                          <ImageSlider images={productImages} getImageUrl={getImageUrl} alt={product.name} />
+                        ) : (
+                          <img src={getImageUrl(productImages[0])} alt={product.name} />
+                        )
                       ) : (
                         <div className="product-placeholder">
                           <span>✦</span>
@@ -270,7 +370,7 @@ const Home = () => {
                           <span className="current-price">₹{parseFloat(product.price).toLocaleString()}</span>
                           <span className="price-note">Inclusive of all taxes</span>
                         </div>
-                        <Link to="/register" className="btn-add">Add to Cart</Link>
+                        <button className="btn-add" onClick={() => handleBuyNow(product)}>Buy Now</button>
                       </div>
                     </div>
                   </div>
@@ -1115,7 +1215,7 @@ const Home = () => {
 
         .product-image-container {
           position: relative;
-          aspect-ratio: 4/3;
+          aspect-ratio: 1/1;
           background: #f5f5f5;
           overflow: hidden;
         }
@@ -1227,20 +1327,20 @@ const Home = () => {
         }
 
         .product-content {
-          padding: 1.5rem;
+          padding: 1rem;
         }
 
         .product-name {
-          font-size: 1.125rem;
+          font-size: 1rem;
           font-weight: 600;
           color: var(--color-text-primary);
-          margin: 0 0 0.5rem 0;
+          margin: 0 0 0.25rem 0;
         }
 
         .product-desc {
-          font-size: 0.875rem;
+          font-size: 0.8125rem;
           color: var(--color-text-muted);
-          margin: 0 0 1rem 0;
+          margin: 0 0 0.75rem 0;
           line-height: 1.5;
           display: -webkit-box;
           -webkit-line-clamp: 2;
@@ -1251,7 +1351,7 @@ const Home = () => {
         .product-features {
           display: flex;
           gap: 0.5rem;
-          margin-bottom: 1rem;
+          margin-bottom: 0.75rem;
           flex-wrap: wrap;
         }
 
@@ -1744,6 +1844,37 @@ const Home = () => {
           margin: 0;
         }
 
+        /* Image Slider Styles */
+        .image-slider {
+          width: 100%;
+          height: 100%;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .slider-dots {
+          position: absolute;
+          bottom: 8px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 6px;
+          z-index: 10;
+        }
+
+        .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.5);
+          transition: all 0.3s ease;
+        }
+
+        .dot.active {
+          background: white;
+          transform: scale(1.2);
+        }
+
         /* ============================================
            RESPONSIVE DESIGN
            ============================================ */
@@ -1922,6 +2053,17 @@ const Home = () => {
         /* Add Google Fonts link */
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&display=swap');
       `}</style>
+
+      {/* Purchase Modal */}
+      <PurchaseModal
+        isOpen={showPurchaseModal}
+        onClose={() => {
+          setShowPurchaseModal(false);
+          setSelectedProduct(null);
+        }}
+        product={selectedProduct}
+        onSuccess={handlePurchaseSuccess}
+      />
     </div>
   );
 };

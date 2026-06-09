@@ -19,6 +19,8 @@ router.get('/users/search', adminController.searchUsersForDeposit);
 router.get('/users/:id', adminController.getUserById);
 router.put('/users/:id/status', adminController.toggleUserStatus);
 router.put('/users/:id/approve-pan', adminController.approvePAN);
+router.put('/users/:id/gst', adminController.updateUserGST);
+router.put('/users/:id/details', adminController.updateUserDetails);
 router.post('/users/:id/login-as', adminController.loginAsUser);
 router.post('/wallet/deposit', adminController.addWalletBalance);
 
@@ -165,6 +167,64 @@ router.post('/gallery/upload-image', uploadGalleryImage.single('image'), (req, r
   }
   const imageUrl = `/uploads/gallery/${req.file.filename}`;
   res.json({ image_url: imageUrl });
+});
+
+// Migrate invoice numbers to new format (BSW1000001XX)
+router.post('/migrate-invoices', async (req, res) => {
+  const pool = require('../config/db');
+  const connection = await pool.getConnection();
+
+  try {
+    console.log('Starting invoice number migration...');
+
+    const [orders] = await connection.execute(
+      `SELECT id, user_id, order_number, created_at FROM orders ORDER BY created_at ASC, id ASC`
+    );
+
+    if (orders.length === 0) {
+      connection.release();
+      return res.json({ success: true, message: 'No orders to migrate', count: 0 });
+    }
+
+    await connection.beginTransaction();
+
+    const baseNumber = 1000000;
+    const updates = [];
+
+    for (let i = 0; i < orders.length; i++) {
+      const order = orders[i];
+      const paddedUserId = order.user_id.toString().padStart(2, '0');
+      const newInvoiceNumber = `BSW1000000${paddedUserId}`;
+
+      await connection.execute(
+        'UPDATE orders SET order_number = ? WHERE id = ?',
+        [newInvoiceNumber, order.id]
+      );
+
+      updates.push({
+        id: order.id,
+        old: order.order_number,
+        new: newInvoiceNumber
+      });
+    }
+
+    await connection.commit();
+    connection.release();
+
+    console.log(`Migration completed: ${orders.length} orders updated`);
+    res.json({
+      success: true,
+      message: `Successfully migrated ${orders.length} orders`,
+      count: orders.length,
+      updates: updates.slice(0, 10) // Show first 10 as sample
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    connection.release();
+    console.error('Migration error:', error);
+    res.status(500).json({ success: false, message: 'Migration failed', error: error.message });
+  }
 });
 
 module.exports = router;

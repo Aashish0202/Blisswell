@@ -29,6 +29,16 @@ const AdminUsers = () => {
     nominee_relation: ''
   });
   const [saving, setSaving] = useState(false);
+  const [editUserModal, setEditUserModal] = useState({ isOpen: false, user: null });
+  const [editUserData, setEditUserData] = useState({
+    name: '',
+    mobile: '',
+    pan_number: '',
+    gst_number: '',
+    state: '',
+    address: ''
+  });
+  const [editUserSaving, setEditUserSaving] = useState(false);
 
   // Calculate pending alerts for admin banner
   const pendingPAN = users.filter(u => u.pan_status === 'pending').length;
@@ -166,6 +176,57 @@ const AdminUsers = () => {
     }
   };
 
+  const openEditUserModal = async (userId) => {
+    try {
+      const response = await adminAPI.getUserById(userId);
+      const user = response.data.user;
+      setEditUserData({
+        name: user.name || '',
+        mobile: user.mobile || '',
+        pan_number: user.pan_number || '',
+        gst_number: user.gst_number || '',
+        state: user.state || '',
+        address: user.address || ''
+      });
+      setEditUserModal({ isOpen: true, user: user });
+    } catch (error) {
+      toast.error('Failed to load user details');
+    }
+  };
+
+  const closeEditUserModal = () => {
+    setEditUserModal({ isOpen: false, user: null });
+    setEditUserData({
+      name: '',
+      mobile: '',
+      pan_number: '',
+      gst_number: '',
+      state: '',
+      address: ''
+    });
+  };
+
+  const handleEditUserChange = (e) => {
+    const { name, value } = e.target;
+    setEditUserData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const saveUserDetails = async () => {
+    if (!editUserModal.user) return;
+
+    setEditUserSaving(true);
+    try {
+      await adminAPI.updateUserDetails(editUserModal.user.id, editUserData);
+      toast.success('User details updated successfully');
+      closeEditUserModal();
+      fetchUsers();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to update user details');
+    } finally {
+      setEditUserSaving(false);
+    }
+  };
+
   const handleBulkAction = async (action) => {
     if (selectedRows.length === 0) return;
 
@@ -265,6 +326,16 @@ const AdminUsers = () => {
       label: 'Actions',
       render: (_, row) => (
         <div className="action-buttons">
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              openEditUserModal(row.id);
+            }}
+            title="Edit user details"
+          >
+            ✏️ Edit
+          </button>
           <button
             className="btn btn-primary btn-sm"
             onClick={(e) => {
@@ -634,6 +705,136 @@ const AdminUsers = () => {
         </div>
       )}
 
+      {/* Edit User Details Modal */}
+      {editUserModal.isOpen && (
+        <div className="modal-overlay" onClick={closeEditUserModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Edit User Details</h2>
+              <button className="close-btn" onClick={closeEditUserModal}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="edit-user-form">
+                <div className="form-group">
+                  <label>Name</label>
+                  <input
+                    type="text"
+                    name="name"
+                    className="form-input"
+                    value={editUserData.name}
+                    onChange={handleEditUserChange}
+                    placeholder="Enter name"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Mobile</label>
+                  <input
+                    type="text"
+                    name="mobile"
+                    className="form-input"
+                    value={editUserData.mobile}
+                    onChange={handleEditUserChange}
+                    placeholder="Enter mobile number"
+                    maxLength={10}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>PAN Number</label>
+                  <input
+                    type="text"
+                    name="pan_number"
+                    className="form-input"
+                    value={editUserData.pan_number}
+                    onChange={handleEditUserChange}
+                    placeholder="ABCDE1234F"
+                    maxLength={10}
+                    style={{ textTransform: 'uppercase' }}
+                  />
+                  <small className="form-hint">10 characters (5 letters + 4 digits + 1 letter)</small>
+                </div>
+                <div className="form-group">
+                  <label>GST Number</label>
+                  <input
+                    type="text"
+                    name="gst_number"
+                    className="form-input"
+                    value={editUserData.gst_number}
+                    onChange={handleEditUserChange}
+                    placeholder="27ANJPC4891P1ZB"
+                    maxLength={15}
+                    style={{ textTransform: 'uppercase' }}
+                  />
+                  <small className="form-hint">15 characters GSTIN</small>
+                </div>
+                <div className="form-group">
+                  <label>State</label>
+                  <select
+                    name="state"
+                    className="form-input"
+                    value={editUserData.state}
+                    onChange={handleEditUserChange}
+                  >
+                    <option value="">Select State</option>
+                    <option value="Andhra Pradesh">Andhra Pradesh</option>
+                    <option value="Arunachal Pradesh">Arunachal Pradesh</option>
+                    <option value="Assam">Assam</option>
+                    <option value="Bihar">Bihar</option>
+                    <option value="Chhattisgarh">Chhattisgarh</option>
+                    <option value="Goa">Goa</option>
+                    <option value="Gujarat">Gujarat</option>
+                    <option value="Haryana">Haryana</option>
+                    <option value="Himachal Pradesh">Himachal Pradesh</option>
+                    <option value="Jharkhand">Jharkhand</option>
+                    <option value="Karnataka">Karnataka</option>
+                    <option value="Kerala">Kerala</option>
+                    <option value="Madhya Pradesh">Madhya Pradesh</option>
+                    <option value="Maharashtra">Maharashtra</option>
+                    <option value="Manipur">Manipur</option>
+                    <option value="Meghalaya">Meghalaya</option>
+                    <option value="Mizoram">Mizoram</option>
+                    <option value="Nagaland">Nagaland</option>
+                    <option value="Odisha">Odisha</option>
+                    <option value="Punjab">Punjab</option>
+                    <option value="Rajasthan">Rajasthan</option>
+                    <option value="Sikkim">Sikkim</option>
+                    <option value="Tamil Nadu">Tamil Nadu</option>
+                    <option value="Telangana">Telangana</option>
+                    <option value="Tripura">Tripura</option>
+                    <option value="Uttar Pradesh">Uttar Pradesh</option>
+                    <option value="Uttarakhand">Uttarakhand</option>
+                    <option value="West Bengal">West Bengal</option>
+                    <option value="Delhi">Delhi</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Address</label>
+                  <textarea
+                    name="address"
+                    className="form-input"
+                    value={editUserData.address}
+                    onChange={handleEditUserChange}
+                    placeholder="Enter address"
+                    rows={3}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={closeEditUserModal}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={saveUserDetails}
+                disabled={editUserSaving}
+              >
+                {editUserSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         .admin-users-page {
           max-width: 1200px;
@@ -702,10 +903,25 @@ const AdminUsers = () => {
           border-bottom: 1px solid var(--gray-200);
         }
 
+        .modal-header h2,
         .modal-header h3 {
           margin: 0;
           font-size: 1.125rem;
           color: var(--gray-900);
+        }
+
+        .close-btn {
+          background: none;
+          border: none;
+          font-size: 1.5rem;
+          cursor: pointer;
+          color: var(--gray-500);
+          padding: 0.25rem;
+          line-height: 1;
+        }
+
+        .close-btn:hover {
+          color: var(--gray-700);
         }
 
         .modal-close {
@@ -724,6 +940,33 @@ const AdminUsers = () => {
 
         .modal-body {
           padding: 1.5rem;
+        }
+
+        .modal-footer {
+          display: flex;
+          justify-content: flex-end;
+          gap: 0.75rem;
+          padding: 1rem 1.5rem;
+          border-top: 1px solid var(--gray-200);
+          background: var(--gray-50);
+        }
+
+        .edit-user-form .form-group {
+          margin-bottom: 1rem;
+        }
+
+        .edit-user-form .form-group label {
+          display: block;
+          font-weight: 500;
+          margin-bottom: 0.5rem;
+          color: var(--gray-700);
+        }
+
+        .edit-user-form .form-hint {
+          display: block;
+          font-size: 0.75rem;
+          color: var(--gray-500);
+          margin-top: 0.25rem;
         }
 
         .kyc-detail-row {

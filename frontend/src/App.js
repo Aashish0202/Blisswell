@@ -26,6 +26,8 @@ import CancellationPolicy from './pages/CancellationPolicy';
 import ReturnExchangePolicy from './pages/ReturnExchangePolicy';
 import ShippingPolicy from './pages/ShippingPolicy';
 import GrievanceRedressal from './pages/GrievanceRedressal';
+import PaymentSecurityDisclaimer from './pages/PaymentSecurityDisclaimer';
+import SocialMediaDisclaimer from './pages/SocialMediaDisclaimer';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
@@ -71,6 +73,17 @@ const AuthLoader = ({ children }) => {
   return children;
 };
 
+// Scroll to top on route change
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+};
+
 // Layout wrapper to hide header/footer on app pages
 const AppLayout = ({ children }) => {
   const location = useLocation();
@@ -107,6 +120,7 @@ function App() {
         <SiteSettingsProvider>
           <AuthLoader>
             <div className="app">
+              <ScrollToTop />
               <AppLayout>
                 <Routes>
                   {/* Public Routes */}
@@ -121,6 +135,8 @@ function App() {
                   <Route path="/return-exchange-policy" element={<ReturnExchangePolicy />} />
                   <Route path="/shipping-policy" element={<ShippingPolicy />} />
                   <Route path="/grievance-redressal" element={<GrievanceRedressal />} />
+                  <Route path="/payment-security-disclaimer" element={<PaymentSecurityDisclaimer />} />
+                  <Route path="/social-media-disclaimer" element={<SocialMediaDisclaimer />} />
                   <Route path="/login" element={<Login />} />
                   <Route path="/register" element={<Register />} />
                   <Route path="/forgot-password" element={<ForgotPassword />} />

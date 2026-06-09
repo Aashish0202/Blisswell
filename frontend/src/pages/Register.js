@@ -13,6 +13,7 @@ const Register = () => {
     email: '',
     mobile: '',
     state: 'Maharashtra',
+    address: '',
     pan_number: '',
     password: '',
     confirmPassword: '',
@@ -183,6 +184,10 @@ const Register = () => {
       toast.error('Invalid mobile number');
       return false;
     }
+    if (!formData.address || formData.address.trim() === '') {
+      toast.error('Address is required');
+      return false;
+    }
     if (!formData.terms_accepted) {
       toast.error('You must accept the terms and conditions');
       return false;
@@ -203,6 +208,7 @@ const Register = () => {
         email: formData.email,
         mobile: formData.mobile,
         state: formData.state,
+        address: formData.address,
         pan_number: formData.pan_number.toUpperCase(),
         password: formData.password,
         ref: formData.ref,
@@ -321,6 +327,20 @@ const Register = () => {
               <option value="West Bengal">West Bengal</option>
               <option value="Delhi">Delhi</option>
             </select>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Address <span style={{ color: '#ef4444' }}>*</span></label>
+            <textarea
+              name="address"
+              className="form-input"
+              value={formData.address}
+              onChange={handleChange}
+              placeholder="Enter your full address (house no, street, city, pincode)"
+              rows="3"
+              style={{ resize: 'vertical', minHeight: '80px' }}
+              required
+            />
           </div>
 
           <div className="form-group">

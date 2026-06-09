@@ -1,14 +1,19 @@
 const pool = require('../config/db');
+const { generateInvoiceNumber } = require('../utils/helpers');
 
 const Order = {
   // Create order
   async create(orderData, connection = pool) {
     const { user_id, product_id, amount, payment_type } = orderData;
     const conn = connection;
+
+    // Generate invoice number with new format
+    const invoiceNumber = await generateInvoiceNumber(conn, user_id);
+
     const [result] = await conn.execute(
       `INSERT INTO orders (user_id, product_id, amount, payment_type, order_number)
        VALUES (?, ?, ?, ?, ?)`,
-      [user_id, product_id, amount, payment_type, `ORD${Date.now()}`]
+      [user_id, product_id, amount, payment_type, invoiceNumber]
     );
     return result.insertId;
   },
@@ -18,8 +23,8 @@ const Order = {
     const [rows] = await pool.execute(
       `SELECT o.*, p.name as product_name, u.name as user_name, u.email as user_email, u.mobile as user_mobile
        FROM orders o
-       JOIN products p ON o.product_id = p.id
-       JOIN users u ON o.user_id = u.id
+       LEFT JOIN products p ON o.product_id = p.id
+       LEFT JOIN users u ON o.user_id = u.id
        WHERE o.id = ?`,
       [id]
     );
@@ -30,9 +35,9 @@ const Order = {
   async getByUserId(userId, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     const [rows] = await pool.execute(
-      `SELECT o.*, p.name as product_name, p.image as product_image, p.price as product_price
+      `SELECT o.*, p.name as product_name, p.image as product_image, p.price as product_price, p.description as product_description
        FROM orders o
-       JOIN products p ON o.product_id = p.id
+       LEFT JOIN products p ON o.product_id = p.id
        WHERE o.user_id = ?
        ORDER BY o.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -47,11 +52,17 @@ const Order = {
     let query = `
       SELECT o.*, p.name as product_name, p.image as product_image, u.name as user_name, u.email as user_email
       FROM orders o
-      JOIN products p ON o.product_id = p.id
-      JOIN users u ON o.user_id = u.id
+      LEFT JOIN products p ON o.product_id = p.id
+      LEFT JOIN users u ON o.user_id = u.id
       WHERE 1=1
     `;
     const params = [];
+
+    // Exclude processing, pending, and failed orders by default (cancelled/failed payments should not show)
+    // Only show orders that have completed payment flow: shipped, delivered, cancelled (after delivery)
+    if (!filters.status) {
+      query += " AND o.status NOT IN ('processing', 'failed', 'pending')";
+    }
 
     if (filters.status) {
       query += ' AND o.status = ?';
@@ -79,8 +90,13 @@ const Order = {
 
   // Count orders
   async count(filters = {}) {
-    let query = 'SELECT COUNT(*) as total FROM orders WHERE 1=1';
+    let query = "SELECT COUNT(*) as total FROM orders WHERE 1=1";
     const params = [];
+
+    // Exclude processing, pending, and failed orders by default
+    if (!filters.status) {
+      query += " AND status NOT IN ('processing', 'failed', 'pending')";
+    }
 
     if (filters.status) {
       query += ' AND status = ?';
@@ -143,7 +159,7 @@ const Order = {
     const [rows] = await pool.execute(
       `SELECT o.*, u.name as user_name
        FROM orders o
-       JOIN users u ON o.user_id = u.id
+       LEFT JOIN users u ON o.user_id = u.id
        ORDER BY o.created_at DESC
        LIMIT ?`,
       [limit]

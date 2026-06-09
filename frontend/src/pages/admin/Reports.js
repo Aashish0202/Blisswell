@@ -370,14 +370,14 @@ const AdminReports = () => {
             </div>
 
             {/* Calculation Info */}
-            <div className="info-box warning">
+            {/* <div className="info-box warning">
               <h4>Liability Calculation</h4>
               <ul>
                 <li><strong>Per Referral Payout:</strong> ₹100 × 12 months = ₹1,200 maximum</li>
                 <li><strong>Gross Margin:</strong> ₹2,100 (product price) - ₹1,200 (max payout) = ₹900 per package</li>
                 <li><strong>Break-even:</strong> System remains profitable as long as payout is within limits</li>
               </ul>
-            </div>
+            </div> */}
           </div>
         </div>
       );

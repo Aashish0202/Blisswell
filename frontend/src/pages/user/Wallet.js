@@ -138,14 +138,14 @@ const Wallet = () => {
           <div className="wallet-content">
             <div className="wallet-label">Available Balance</div>
             <div className="wallet-balance">₹{balance?.toLocaleString() || 0}</div>
-            <div className="wallet-actions">
+            {/* <div className="wallet-actions">
               <button
                 className="btn btn-primary"
                 onClick={() => setShowDepositModal(true)}
               >
                 <span>💳</span> Add Funds
               </button>
-            </div>
+            </div> */}
           </div>
           <div className="wallet-decoration">
             <div className="decoration-circle c1"></div>
@@ -242,9 +242,9 @@ const Wallet = () => {
               <div className="empty-icon">💳</div>
               <h4>No transactions yet</h4>
               <p>Add funds to your wallet to get started</p>
-              <button className="btn btn-primary" onClick={() => setShowDepositModal(true)}>
+              {/* <button className="btn btn-primary" onClick={() => setShowDepositModal(true)}>
                 Add Funds
-              </button>
+              </button> */}
             </div>
           )}
         </div>

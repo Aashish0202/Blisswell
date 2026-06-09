@@ -34,6 +34,8 @@ const AdminSettings = () => {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [migrationResult, setMigrationResult] = useState(null);
   const { refreshSettings } = useSiteSettings();
 
   useEffect(() => {
@@ -132,6 +134,23 @@ const AdminSettings = () => {
     } finally {
       setSaving(false);
       setShowConfirmDialog(false);
+    }
+  };
+
+  const handleMigrateInvoices = async () => {
+    if (!window.confirm('This will update all existing order numbers to the new BSW format. Continue?')) {
+      return;
+    }
+    setMigrating(true);
+    setMigrationResult(null);
+    try {
+      const response = await adminAPI.migrateInvoices();
+      setMigrationResult(response.data);
+      toast.success(response.data.message);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Migration failed');
+    } finally {
+      setMigrating(false);
     }
   };
 
@@ -489,6 +508,32 @@ const AdminSettings = () => {
                 </div>
               </form>
             </div>
+
+            {/* Invoice Migration */}
+            <div className="card animate-fade-in" style={{ animationDelay: '0.25s' }}>
+              <div className="card-header">
+                <h3 className="card-title">🧾 Invoice Number Migration</h3>
+              </div>
+              <div className="migration-section">
+                <p className="migration-desc">
+                  Update existing order numbers to the new BSW format (e.g., BSW100000101).
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleMigrateInvoices}
+                  disabled={migrating}
+                >
+                  {migrating ? 'Migrating...' : 'Run Migration'}
+                </button>
+                {migrationResult && (
+                  <div className="migration-result">
+                    <p className="success-text">✓ {migrationResult.message}</p>
+                    <p className="migrated-count">Total orders updated: {migrationResult.count}</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Info Cards */}
@@ -819,6 +864,36 @@ const AdminSettings = () => {
 
         .info-card.highlight .btn {
           margin-top: 0.75rem;
+        }
+
+        .migration-section {
+          padding: 1rem 0;
+        }
+
+        .migration-desc {
+          color: var(--gray-600);
+          margin-bottom: 1rem;
+          font-size: 0.875rem;
+        }
+
+        .migration-result {
+          margin-top: 1rem;
+          padding: 1rem;
+          background: var(--green-50);
+          border-radius: var(--radius-lg);
+          border: 1px solid var(--green-200);
+        }
+
+        .migration-result .success-text {
+          color: var(--green-700);
+          font-weight: 500;
+          margin: 0 0 0.5rem 0;
+        }
+
+        .migration-result .migrated-count {
+          color: var(--gray-600);
+          font-size: 0.875rem;
+          margin: 0;
         }
 
         @media (max-width: 1024px) {

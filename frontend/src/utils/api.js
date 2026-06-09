@@ -77,7 +77,12 @@ export const orderAPI = {
   getProducts: () => api.get('/orders/products'),
   purchaseProduct: (productId) => api.post('/orders/purchase', { product_id: productId }),
   getMyOrders: (page) => api.get(`/orders/my-orders?page=${page}`),
-  getOrderDetails: (id) => api.get(`/orders/${id}`)
+  getOrderDetails: (id) => api.get(`/orders/${id}`),
+  // Direct payment endpoints
+  createPaymentOrder: (productId) => api.post('/orders/create-payment-order', { product_id: productId }),
+  verifyAndPurchase: (data) => api.post('/orders/verify-and-purchase', data),
+  recordCancelledPayment: (data) => api.post('/orders/record-cancelled', data),
+  recordFailedPayment: (data) => api.post('/orders/record-failed', data),
 };
 
 // Admin API
@@ -130,7 +135,12 @@ export const adminAPI = {
   getUserKYC: (userId) => api.get(`/admin/kyc/user/${userId}`),
   approveKYC: (id) => api.put(`/admin/kyc/${id}/approve`),
   rejectKYC: (id, reason) => api.put(`/admin/kyc/${id}/reject`, { reason }),
-  updateKYC: (id, data) => api.put(`/admin/kyc/${id}`, data)
+  updateKYC: (id, data) => api.put(`/admin/kyc/${id}`, data),
+  // User Management
+  updateUserDetails: (userId, data) => api.put(`/admin/users/${userId}/details`, data),
+  updateUserGST: (userId, gstNumber) => api.put(`/admin/users/${userId}/gst`, { gst_number: gstNumber }),
+  // Invoice Migration
+  migrateInvoices: () => api.post('/admin/migrate-invoices')
 };
 
 // Site Settings API (public)

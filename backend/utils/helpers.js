@@ -44,11 +44,18 @@ const validateMobile = (mobile) => {
   return mobileRegex.test(mobile);
 };
 
-// Generate order number
+// Generate order number (legacy)
 const generateOrderNumber = () => {
   const timestamp = Date.now().toString(36).toUpperCase();
   const random = Math.random().toString(36).substring(2, 6).toUpperCase();
   return `ORD${timestamp}${random}`;
+};
+
+// Generate invoice number with new format: BSW + 1000000 + userId
+// Format: BSW100000001 (BSW + 1000000 + userId padded to 2 digits)
+const generateInvoiceNumber = async (connection, userId) => {
+  const paddedUserId = userId.toString().padStart(2, '0');
+  return `BSW1000000${paddedUserId}`;
 };
 
 // Calculate pagination
@@ -85,6 +92,7 @@ module.exports = {
   validatePAN,
   validateMobile,
   generateOrderNumber,
+  generateInvoiceNumber, //here
   calculatePagination,
   formatDate
 };

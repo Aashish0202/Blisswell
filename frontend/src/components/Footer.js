@@ -118,6 +118,8 @@ const Footer = () => {
                 <li><Link to="/return-exchange-policy">Return / Exchange</Link></li>
                 <li><Link to="/shipping-policy">Shipping Policy</Link></li>
                 <li><Link to="/grievance-redressal">Grievance Redressal</Link></li>
+                <li><Link to="/payment-security-disclaimer">Payment Security Disclaimer</Link></li>
+                <li><Link to="/social-media-disclaimer">Social Media Disclaimer</Link></li>
               </ul>
             </div>
 
@@ -191,12 +193,12 @@ const Footer = () => {
         <div className="container">
           <div className="footer-bottom-content">
             <p>&copy; {new Date().getFullYear()} {siteName || 'Blisswell'}. All rights reserved.</p>
-            <div className="footer-legal">
+            {/* <div className="footer-legal">
               <Link to="/privacy-policy">Privacy Policy</Link>
               <Link to="/terms-conditions">Terms of Use</Link>
               <Link to="/return-exchange-policy">Return Policy</Link>
               <Link to="/shipping-policy">Shipping Policy</Link>
-            </div>
+            </div> */}
           </div>
         </div>
       </div>

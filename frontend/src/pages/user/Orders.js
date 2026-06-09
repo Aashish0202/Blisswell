@@ -6,21 +6,111 @@ import DashboardLayout from '../../components/DashboardLayout';
 import { useSiteSettings } from '../../components/SiteSettingsProvider';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
-import ConfirmationDialog from '../../components/ConfirmationDialog';
+import PurchaseModal from '../../components/PurchaseModal';
 import html2pdf from 'html2pdf.js';
 
 const API_URL = process.env.REACT_APP_API_URL;
+
+// Image Lightbox Component
+const ImageLightbox = ({ images, currentIndex, onClose, onNext, onPrev, getImageUrl }) => {
+  if (!images || images.length === 0) return null;
+
+  return (
+    <div className="lightbox-overlay" onClick={onClose}>
+      <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+        <button className="lightbox-close" onClick={onClose}>&times;</button>
+
+        {images.length > 1 && (
+          <button className="lightbox-nav lightbox-prev" onClick={(e) => { e.stopPropagation(); onPrev(); }}>
+            &#8249;
+          </button>
+        )}
+
+        <img src={getImageUrl(images[currentIndex])} alt="Product" className="lightbox-image" />
+
+        {images.length > 1 && (
+          <button className="lightbox-nav lightbox-next" onClick={(e) => { e.stopPropagation(); onNext(); }}>
+            &#8250;
+          </button>
+        )}
+
+        {images.length > 1 && (
+          <div className="lightbox-dots">
+            {images.map((_, idx) => (
+              <span
+                key={idx}
+                className={`lightbox-dot ${idx === currentIndex ? 'active' : ''}`}
+                onClick={(e) => { e.stopPropagation(); }}
+              ></span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Image Slider Component for products with multiple images
+const ImageSlider = ({ images, getImageUrl, alt, onImageClick }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (images && images.length > 1) {
+      intervalRef.current = setInterval(() => {
+        setCurrentIndex((prev) => (prev + 1) % images.length);
+      }, 4000);
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [images]);
+
+  if (!images || images.length === 0) {
+    return (
+      <div className="product-placeholder">
+        <span className="product-emoji">🛏️</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="image-slider" onClick={onImageClick} style={{ cursor: 'pointer' }}>
+      <img
+        src={getImageUrl(images[currentIndex])}
+        alt={alt}
+        onError={(e) => {
+          e.target.onerror = null;
+          e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="180" viewBox="0 0 200 180"><rect fill="%23f3f4f6" width="200" height="180"/><text x="100" y="90" text-anchor="middle" font-size="60">🛏️</text></svg>';
+        }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'opacity 0.3s ease' }}
+      />
+      {images.length > 1 && (
+        <div className="slider-dots">
+          {images.map((_, idx) => (
+            <span key={idx} className={`dot ${idx === currentIndex ? 'active' : ''}`}></span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [purchaseDialog, setPurchaseDialog] = useState({ isOpen: false, product: null });
-  const [purchasing, setPurchasing] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [lightbox, setLightbox] = useState({ isOpen: false, images: [], currentIndex: 0 });
   const [userState, setUserState] = useState('');
   const [userName, setUserName] = useState('');
   const [userReferralCode, setUserReferralCode] = useState('');
+  const [userGstNumber, setUserGstNumber] = useState('');
+  const [expandedDescriptions, setExpandedDescriptions] = useState({});
   const invoiceRef = useRef(null);
   const { user } = useSelector((state) => state.auth);
   const { siteName, siteLogo, contact_address, contact_email, contact_phone, company_state } = useSiteSettings();
@@ -48,6 +138,9 @@ const Orders = () => {
         if (profileRes.data.user.referral_code) {
           setUserReferralCode(profileRes.data.user.referral_code);
         }
+        if (profileRes.data.user.gst_number) {
+          setUserGstNumber(profileRes.data.user.gst_number);
+        }
       }
     } catch (error) {
       toast.error('Failed to load data');
@@ -56,24 +149,26 @@ const Orders = () => {
     }
   };
 
-  const handlePurchase = async () => {
-    if (!purchaseDialog.product) return;
-
-    setPurchasing(true);
-    try {
-      await orderAPI.purchaseProduct(purchaseDialog.product.id);
-      toast.success('Purchase successful!');
-      fetchData();
-      setPurchaseDialog({ isOpen: false, product: null });
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Purchase failed');
-    } finally {
-      setPurchasing(false);
-    }
+  const toggleDescription = (productId) => {
+    setExpandedDescriptions(prev => ({
+      ...prev,
+      [productId]: !prev[productId]
+    }));
   };
 
   const openPurchaseDialog = (product) => {
-    setPurchaseDialog({ isOpen: true, product });
+    setSelectedProduct(product);
+    setShowPurchaseModal(true);
+  };
+
+  const closePurchaseModal = () => {
+    setShowPurchaseModal(false);
+    setSelectedProduct(null);
+  };
+
+  const handlePurchaseSuccess = () => {
+    fetchData();
+    closePurchaseModal();
   };
 
   const getStatusBadge = (status) => {
@@ -104,11 +199,20 @@ const Orders = () => {
   };
 
   // Calculate invoice details with state-based GST
+  // GST Rate: 5% total (price is GST-inclusive)
+  // Same state (Maharashtra): CGST 2.5% + SGST 2.5% = 5%
+  // Other states: IGST 5%
   const calculateInvoice = (order) => {
-    const basePrice = parseFloat(order.amount) || parseFloat(order.product_price) || 0;
-    const gstRate = 18; // 18% GST total
+    const totalPrice = parseFloat(order.amount) || parseFloat(order.product_price) || 0;
+    const gstRate = 5; // 5% GST total
 
-    // Determine if same state (CGST + SGST) or different state (IGST)
+    // Price is GST-inclusive, extract taxable value
+    // Taxable Value = Total Price / (1 + GST Rate/100)
+    // For 5% GST: Taxable Value = Total Price / 1.05
+    const taxableValue = totalPrice / 1.05;
+    const totalGstAmount = totalPrice - taxableValue;
+
+    // Determine if same state (Maharashtra) or different state
     const isSameState = userState && company_state &&
       userState.toLowerCase().trim() === company_state.toLowerCase().trim();
 
@@ -117,34 +221,33 @@ const Orders = () => {
     let igstAmount = 0;
 
     if (isSameState) {
-      // Same state: CGST (9%) + SGST (9%)
-      cgstAmount = (basePrice * 9) / 100;
-      sgstAmount = (basePrice * 9) / 100;
+      // Same state (Maharashtra): CGST 2.5% + SGST 2.5%
+      cgstAmount = (taxableValue * 2.5) / 100;
+      sgstAmount = (taxableValue * 2.5) / 100;
     } else {
-      // Different state or state not specified: IGST (18%)
-      igstAmount = (basePrice * 18) / 100;
+      // Other states: IGST 5%
+      igstAmount = (taxableValue * 5) / 100;
     }
 
-    const totalGstAmount = cgstAmount + sgstAmount + igstAmount;
-    const totalPrice = basePrice + totalGstAmount;
-
     return {
-      basePrice,
+      basePrice: taxableValue, // Taxable value (before GST)
+      totalPrice, // Total price (GST-inclusive)
       gstRate,
       cgstAmount,
       sgstAmount,
       igstAmount,
       totalGstAmount,
-      totalPrice,
       isSameState,
       invoiceNumber: order.order_number || `INV-${order.id}`,
       invoiceDate: order.created_at,
       productName: order.product_name || 'Product',
+      productDescription: order.product_description || '',
       status: order.status,
       userState: userState || 'Not specified',
       companyState: company_state || 'Maharashtra',
       buyerName: userName || 'Customer',
-      buyerReferralCode: userReferralCode || ''
+      buyerReferralCode: userReferralCode || '',
+      buyerGstNumber: userGstNumber || ''
     };
   };
 
@@ -210,28 +313,30 @@ const Orders = () => {
                 const salaryDuration = parseInt(product.salary_duration || 12);
                 const totalPayout = salaryAmount * salaryDuration;
 
+                // Get images array or fallback to single image
+                const productImages = product.images && product.images.length > 0
+                  ? product.images
+                  : product.image ? [product.image] : [];
+
+                const openLightbox = () => {
+                  if (productImages.length > 0) {
+                    setLightbox({ isOpen: true, images: productImages, currentIndex: 0 });
+                  }
+                };
+
                 return (
                   <div
                     key={product.id}
                     className="product-card-enhanced hover-lift animate-card"
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
-                    <div className="product-image-wrapper">
-                      {product.image ? (
-                        <img
-                          src={getImageUrl(product.image)}
-                          alt={product.name}
-                          className="product-img"
-                          onError={(e) => {
-                            e.target.onerror = null;
-                            e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="180" viewBox="0 0 200 180"><rect fill="%23f3f4f6" width="200" height="180"/><text x="100" y="90" text-anchor="middle" font-size="60">🛏️</text></svg>';
-                          }}
-                        />
-                      ) : (
-                        <div className="product-placeholder">
-                          <span className="product-emoji">🛏️</span>
-                        </div>
-                      )}
+                    <div className="product-image-wrapper" onClick={openLightbox} style={{ cursor: productImages.length > 0 ? 'pointer' : 'default' }}>
+                      <ImageSlider
+                        images={productImages}
+                        getImageUrl={getImageUrl}
+                        alt={product.name}
+                        onImageClick={openLightbox}
+                      />
                       {!product.is_active && (
                         <div className="product-unavailable">
                           <span>Currently Unavailable</span>
@@ -240,7 +345,19 @@ const Orders = () => {
                     </div>
                     <div className="product-content">
                       <h4 className="product-title">{product.name}</h4>
-                      <p className="product-desc">{product.description || 'Premium quality product'}</p>
+                      <div className={`product-desc-wrapper ${expandedDescriptions[product.id] ? 'expanded' : ''}`}>
+                        <p className="product-desc">
+                          {product.description || 'Premium quality product'}
+                        </p>
+                        {product.description && product.description.length > 80 && (
+                          <button
+                            className="see-more-btn"
+                            onClick={() => toggleDescription(product.id)}
+                          >
+                            {expandedDescriptions[product.id] ? 'See Less' : 'See More'}
+                          </button>
+                        )}
+                      </div>
 
                       {/* Salary Benefits Card */}
                       <div className="salary-benefits-card">
@@ -355,17 +472,31 @@ const Orders = () => {
         </div>
       </div>
 
-      {/* Purchase Confirmation Dialog */}
-      <ConfirmationDialog
-        isOpen={purchaseDialog.isOpen}
-        onClose={() => setPurchaseDialog({ isOpen: false, product: null })}
-        onConfirm={handlePurchase}
-        title="Confirm Purchase"
-        message={purchaseDialog.product ? `Are you sure you want to purchase "${purchaseDialog.product.name}" for ₹${purchaseDialog.product.price?.toLocaleString()}? The amount will be deducted from your wallet.` : ''}
-        confirmText={purchasing ? 'Processing...' : 'Confirm Purchase'}
-        variant="info"
-        loading={purchasing}
+      {/* Purchase Modal */}
+      <PurchaseModal
+        isOpen={showPurchaseModal}
+        onClose={closePurchaseModal}
+        product={selectedProduct}
+        onSuccess={handlePurchaseSuccess}
       />
+
+      {/* Image Lightbox */}
+      {lightbox.isOpen && (
+        <ImageLightbox
+          images={lightbox.images}
+          currentIndex={lightbox.currentIndex}
+          onClose={() => setLightbox({ isOpen: false, images: [], currentIndex: 0 })}
+          onNext={() => setLightbox(prev => ({
+            ...prev,
+            currentIndex: (prev.currentIndex + 1) % prev.images.length
+          }))}
+          onPrev={() => setLightbox(prev => ({
+            ...prev,
+            currentIndex: (prev.currentIndex - 1 + prev.images.length) % prev.images.length
+          }))}
+          getImageUrl={getImageUrl}
+        />
+      )}
 
       {/* Invoice Modal */}
       {selectedInvoice && (
@@ -395,6 +526,7 @@ const Orders = () => {
                   <div className="company-contact">
                     {contact_phone && <span>📞 {contact_phone}</span>}
                     {contact_email && <span>✉️ {contact_email}</span>}
+                    <div>GST Number: <span className='font-bold'>27ANJPC4891P1ZB</span></div>
                   </div>
                 </div>
               </div>
@@ -442,6 +574,12 @@ const Orders = () => {
                     <span className="buyer-label">State:</span>
                     <span className="buyer-value">{selectedInvoice.userState}</span>
                   </div>
+                  {selectedInvoice.buyerGstNumber && (
+                    <div className="buyer-row">
+                      <span className="buyer-label">GST No:</span>
+                      <span className="buyer-value gst-number">{selectedInvoice.buyerGstNumber}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -457,7 +595,17 @@ const Orders = () => {
                   </thead>
                   <tbody>
                     <tr>
-                      <td>{selectedInvoice.productName}</td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{selectedInvoice.productName}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--gray-600)', marginTop: '0.25rem' }}>
+                          <span style={{ fontWeight: 500 }}>HSN:</span> 6304
+                        </div>
+                        {selectedInvoice.productDescription && (
+                          <div style={{ fontSize: '0.8125rem', color: 'var(--gray-500)', marginTop: '0.25rem' }}>
+                            {selectedInvoice.productDescription}
+                          </div>
+                        )}
+                      </td>
                       <td className="text-center">1</td>
                       <td className="text-right">₹{selectedInvoice.basePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
                       <td className="text-right">₹{selectedInvoice.basePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
@@ -468,30 +616,43 @@ const Orders = () => {
 
               <div className="invoice-summary">
                 <div className="summary-row">
-                  <span>Subtotal</span>
+                  <span>Taxable Value</span>
                   <span>₹{selectedInvoice.basePrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                 </div>
                 {selectedInvoice.isSameState ? (
                   <>
                     <div className="summary-row">
-                      <span>CGST (9%)</span>
+                      <span>CGST (2.5%)</span>
                       <span>₹{selectedInvoice.cgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
                     <div className="summary-row">
-                      <span>SGST (9%)</span>
+                      <span>SGST (2.5%)</span>
                       <span>₹{selectedInvoice.sgstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
                   </>
                 ) : (
-                  <div className="summary-row">
-                    <span>IGST (18%)</span>
-                    <span>₹{selectedInvoice.igstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                  </div>
+                  <>
+                    <div className="summary-row">
+                      <span>IGST (5%)</span>
+                      <span>₹{selectedInvoice.igstAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  </>
                 )}
                 <div className="summary-row total">
                   <span>Total Amount</span>
                   <span>₹{selectedInvoice.totalPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                 </div>
+              </div>
+
+              {/* Invoice Conditions */}
+              <div className="invoice-conditions">
+                <div className="conditions-title">Invoice Conditions:</div>
+                <ol className="conditions-list">
+                  <li>Goods once sold will not be taken back or exchanged unless there is a manufacturing defect.</li>
+                  <li>Any shortage or damage must be reported within 24 hours of delivery with unboxing video proof.</li>
+                  <li>No complaints will be entertained after 48 hours of delivery.</li>
+                  <li>All disputes are subject to Nashik Jurisdiction.</li>
+                </ol>
               </div>
 
               <div className="invoice-footer">
@@ -576,6 +737,140 @@ const Orders = () => {
           font-size: 4rem;
         }
 
+        .image-slider {
+          position: relative;
+          width: 100%;
+          height: 100%;
+        }
+
+        .slider-dots {
+          position: absolute;
+          bottom: 8px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 6px;
+          z-index: 10;
+        }
+
+        .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.5);
+          transition: all 0.3s ease;
+        }
+
+        .dot.active {
+          background: white;
+          transform: scale(1.2);
+        }
+
+        /* Lightbox Styles */
+        .lightbox-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.9);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2000;
+          padding: 2rem;
+        }
+
+        .lightbox-content {
+          position: relative;
+          max-width: 90vw;
+          max-height: 90vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .lightbox-image {
+          max-width: 100%;
+          max-height: 85vh;
+          object-fit: contain;
+          border-radius: 8px;
+        }
+
+        .lightbox-close {
+          position: absolute;
+          top: -40px;
+          right: 0;
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          font-size: 1.5rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: background 0.2s;
+        }
+
+        .lightbox-close:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .lightbox-nav {
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          font-size: 1.5rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: background 0.2s;
+        }
+
+        .lightbox-nav:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .lightbox-prev {
+          left: -60px;
+        }
+
+        .lightbox-next {
+          right: -60px;
+        }
+
+        .lightbox-dots {
+          position: absolute;
+          bottom: -30px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 8px;
+        }
+
+        .lightbox-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.4);
+          transition: all 0.3s ease;
+        }
+
+        .lightbox-dot.active {
+          background: white;
+          transform: scale(1.2);
+        }
+
         .product-unavailable {
           position: absolute;
           inset: 0;
@@ -599,15 +894,44 @@ const Orders = () => {
           margin-bottom: 0.5rem;
         }
 
-        .product-desc {
-          font-size: 0.8125rem;
-          color: var(--gray-500);
-          line-height: 1.5;
+        .product-desc-wrapper {
           margin-bottom: 1rem;
+        }
+
+        .product-desc-wrapper:not(.expanded) .product-desc {
           display: -webkit-box;
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
           overflow: hidden;
+        }
+
+        .product-desc-wrapper.expanded .product-desc {
+          display: block;
+        }
+
+        .product-desc {
+          font-size: 0.8125rem;
+          color: var(--gray-500);
+          line-height: 1.5;
+          margin: 0;
+        }
+
+        .see-more-btn {
+          background: none;
+          border: none;
+          color: var(--primary-600);
+          font-size: 0.75rem;
+          font-weight: 500;
+          cursor: pointer;
+          padding: 0.25rem 0 0 0;
+          margin-top: 0.25rem;
+          text-decoration: none;
+          display: inline-block;
+        }
+
+        .see-more-btn:hover {
+          color: var(--primary-700);
+          text-decoration: underline;
         }
 
         /* Salary Benefits Card */
@@ -1128,6 +1452,38 @@ const Orders = () => {
           margin: 0.5rem -0.5rem;
           padding: 0.75rem 0.5rem;
           border-radius: var(--radius-sm);
+        }
+
+        /* Invoice Conditions */
+        .invoice-conditions {
+          margin-top: 1.5rem;
+          padding: 1rem;
+          background: var(--gray-50);
+          border: 1px solid var(--gray-200);
+          border-radius: var(--radius-md);
+        }
+
+        .conditions-title {
+          font-size: 0.8125rem;
+          font-weight: 600;
+          color: var(--gray-700);
+          margin-bottom: 0.5rem;
+        }
+
+        .conditions-list {
+          margin: 0;
+          padding-left: 1.25rem;
+          font-size: 0.75rem;
+          color: var(--gray-600);
+          line-height: 1.6;
+        }
+
+        .conditions-list li {
+          margin-bottom: 0.25rem;
+        }
+
+        .conditions-list li:last-child {
+          margin-bottom: 0;
         }
 
         /* Invoice Footer */

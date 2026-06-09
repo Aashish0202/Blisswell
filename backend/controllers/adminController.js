@@ -96,6 +96,8 @@ exports.getUserById = async (req, res) => {
         mobile: user.mobile,
         pan_number: user.pan_number,
         pan_status: user.pan_status,
+        gst_number: user.gst_number,
+        gst_status: user.gst_status,
         referral_code: user.referral_code,
         referred_by: user.referred_by,
         has_active_package: user.has_active_package,
@@ -136,6 +138,87 @@ exports.approvePAN = async (req, res) => {
   }
 };
 
+// Update user GST number (admin only)
+exports.updateUserGST = async (req, res) => {
+  try {
+    const { gst_number } = req.body;
+    const userId = req.params.id;
+
+    // Validate GST format if provided
+    if (gst_number && gst_number.trim() !== '') {
+      const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+      if (!gstRegex.test(gst_number.toUpperCase())) {
+        return res.status(400).json({ message: 'Invalid GST number format. Example: 27ANJPC4891P1ZB' });
+      }
+      await User.update(userId, { gst_number: gst_number.toUpperCase(), gst_status: 'approved' });
+    } else {
+      // Clear GST number
+      await User.update(userId, { gst_number: null, gst_status: null });
+    }
+
+    res.json({ message: 'GST number updated successfully' });
+  } catch (error) {
+    console.error('Update GST error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Update user details (admin only)
+exports.updateUserDetails = async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { name, mobile, pan_number, gst_number, state, address } = req.body;
+
+    const updateData = {};
+
+    // Only update fields that are provided
+    if (name !== undefined) updateData.name = name;
+    if (mobile !== undefined) updateData.mobile = mobile;
+
+    // Validate and update PAN if provided
+    if (pan_number !== undefined && pan_number !== '') {
+      const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+      if (!panRegex.test(pan_number.toUpperCase())) {
+        return res.status(400).json({ message: 'Invalid PAN format. Example: ABCDE1234F' });
+      }
+      // Check if PAN is already used by another user
+      const existingPAN = await User.findByPAN(pan_number);
+      if (existingPAN && existingPAN.id !== parseInt(userId)) {
+        return res.status(400).json({ message: 'PAN number already registered by another user' });
+      }
+      updateData.pan_number = pan_number.toUpperCase();
+      updateData.pan_status = 'approved'; // Admin-updated PAN is auto-approved
+    } else if (pan_number === '') {
+      updateData.pan_number = null;
+      updateData.pan_status = null;
+    }
+
+    // Validate and update GST if provided
+    if (gst_number !== undefined && gst_number !== '') {
+      const gstRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
+      if (!gstRegex.test(gst_number.toUpperCase())) {
+        return res.status(400).json({ message: 'Invalid GST number format. Example: 27ANJPC4891P1ZB' });
+      }
+      updateData.gst_number = gst_number.toUpperCase();
+      updateData.gst_status = 'approved'; // Admin-updated GST is auto-approved
+    } else if (gst_number === '') {
+      updateData.gst_number = null;
+      updateData.gst_status = null;
+    }
+
+    // Update state and address if provided
+    if (state !== undefined) updateData.state = state;
+    if (address !== undefined) updateData.address = address;
+
+    await User.update(userId, updateData);
+
+    res.json({ message: 'User details updated successfully' });
+  } catch (error) {
+    console.error('Update user details error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // ==================== ORDER MANAGEMENT ====================
 
 // Get all orders
@@ -151,8 +234,12 @@ exports.getOrders = async (req, res) => {
       end_date: req.query.end_date
     };
 
+    console.log('[Admin] Fetching orders - Page:', page, 'Filters:', filters);
+
     const orders = await Order.getAll(page, limit, filters);
     const total = await Order.count(filters);
+
+    console.log('[Admin] Orders found:', orders.length, 'Total:', total);
 
     res.json({
       orders,
@@ -163,7 +250,7 @@ exports.getOrders = async (req, res) => {
     });
   } catch (error) {
     console.error('Get orders error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
@@ -197,7 +284,7 @@ exports.getProducts = async (req, res) => {
 // Create product
 exports.createProduct = async (req, res) => {
   try {
-    const { name, description, price, salary_amount, salary_duration, image } = req.body;
+    const { name, description, price, salary_amount, salary_duration, image, images } = req.body;
 
     const productId = await Product.create({
       name,
@@ -206,6 +293,7 @@ exports.createProduct = async (req, res) => {
       salary_amount: salary_amount || 100,
       salary_duration: salary_duration || 12,
       image,
+      images, // New field for multiple images
       is_active: true
     });
 
@@ -222,7 +310,7 @@ exports.createProduct = async (req, res) => {
 // Update product
 exports.updateProduct = async (req, res) => {
   try {
-    const { name, description, price, salary_amount, salary_duration, image, is_active } = req.body;
+    const { name, description, price, salary_amount, salary_duration, image, images, is_active } = req.body;
 
     await Product.update(req.params.id, {
       name,
@@ -231,6 +319,7 @@ exports.updateProduct = async (req, res) => {
       salary_amount,
       salary_duration,
       image,
+      images, // New field for multiple images
       is_active
     });
 

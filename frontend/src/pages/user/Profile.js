@@ -16,7 +16,8 @@ const Profile = () => {
     mobile: '',
     state: '',
     address: '',
-    pan_number: ''
+    pan_number: '',
+    gst_number: ''
   });
   const [kycData, setKycData] = useState({
     bank_name: '',
@@ -49,7 +50,8 @@ const Profile = () => {
         mobile: response.data.user.mobile || '',
         state: response.data.user.state || '',
         address: response.data.user.address || '',
-        pan_number: response.data.user.pan_number || ''
+        pan_number: response.data.user.pan_number || '',
+        gst_number: response.data.user.gst_number || ''
       });
       if (response.data.kyc) {
         setExistingKyc(response.data.kyc);
@@ -158,6 +160,11 @@ const Profile = () => {
       // Only include pan_number if it's not already set (not locked)
       if (!profileData.pan_number || profileData.pan_number.trim() === '') {
         updateData.pan_number = formData.pan_number;
+      }
+
+      // Only include gst_number if it's not already set (not locked)
+      if (!profileData.gst_number || profileData.gst_number.trim() === '') {
+        updateData.gst_number = formData.gst_number;
       }
 
       await userAPI.updateProfile(updateData);
@@ -406,6 +413,32 @@ const Profile = () => {
                       <span className="hint-info">⚠️ Please enter your PAN. One-time entry only - cannot be changed later.</span>
                     )}
                   </div>
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">GST Number</label>
+                  <input
+                    type="text"
+                    name="gst_number"
+                    className="form-input"
+                    value={formData.gst_number}
+                    maxLength={15}
+                    onChange={handleProfileChange}
+                    pattern="[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}"
+                    placeholder="e.g., 27ANJPC4891P1ZB"
+                    style={{ textTransform: 'uppercase' }}
+                    disabled={profileData.gst_number && profileData.gst_number.trim() !== ''}
+                  />
+                  {profileData.gst_number && profileData.gst_number.trim() !== '' && (
+                    <small className="form-hint" style={{ color: 'var(--accent-600)' }}>
+                      🔒 GST cannot be changed once submitted. Contact admin for corrections.
+                    </small>
+                  )}
+                  {!profileData.gst_number && (
+                    <small className="form-hint">Enter your GST number for invoices (optional). One-time entry only.</small>
+                  )}
                 </div>
               </div>
 

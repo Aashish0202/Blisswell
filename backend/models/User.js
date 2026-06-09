@@ -3,11 +3,11 @@ const pool = require('../config/db');
 const User = {
   // Create new user
   async create(userData) {
-    const { name, email, mobile, state, password, pan_number, referral_code, referred_by } = userData;
+    const { name, email, mobile, state, address, password, pan_number, referral_code, referred_by } = userData;
     const [result] = await pool.execute(
-      `INSERT INTO users (name, email, mobile, state, password, pan_number, referral_code, referred_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, email, mobile, state || null, password, pan_number, referral_code, referred_by || null]
+      `INSERT INTO users (name, email, mobile, state, address, password, pan_number, referral_code, referred_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, email, mobile, state || null, address || null, password, pan_number, referral_code, referred_by || null]
     );
     return result.insertId;
   },
@@ -61,7 +61,7 @@ const User = {
   // Get all users (with pagination)
   async getAll(page = 1, limit = 20, filters = {}) {
     const offset = (page - 1) * limit;
-    let query = 'SELECT id, name, email, mobile, pan_number, pan_status, referral_code, is_active, has_active_package, created_at FROM users WHERE 1=1';
+    let query = 'SELECT id, name, email, mobile, pan_number, pan_status, gst_number, referral_code, is_active, has_active_package, created_at FROM users WHERE 1=1';
     const params = [];
 
     if (filters.status !== undefined) {
