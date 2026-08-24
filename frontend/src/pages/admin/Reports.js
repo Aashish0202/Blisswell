@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import { adminAPI } from '../../utils/api';
 import AdminLayout from '../../components/AdminLayout';
-import ExportButton from '../../components/ExportButton';
+import Pagination from '../../components/Pagination';
+import ExportMenu from '../../components/ExportMenu';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
 
 const AdminReports = () => {
@@ -14,6 +15,7 @@ const AdminReports = () => {
   const [walletReport, setWalletReport] = useState(null);
   const [userFinancialReport, setUserFinancialReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({
     start_date: '',
     end_date: '',
@@ -26,10 +28,12 @@ const AdminReports = () => {
   });
 
   useEffect(() => {
-    fetchReports();
+    setPage(1);
+    fetchReports(1);
+    // eslint-disable-next-line
   }, [activeTab]);
 
-  const fetchReports = async () => {
+  const fetchReports = async (pageNum = page) => {
     setLoading(true);
     try {
       if (activeTab === 'sales') {
@@ -42,19 +46,19 @@ const AdminReports = () => {
         const response = await adminAPI.getLiabilityReport();
         setLiabilityReport(response.data);
       } else if (activeTab === 'referrals') {
-        const response = await adminAPI.getReferralReport(1, {
+        const response = await adminAPI.getReferralReport(pageNum, {
           start_date: filters.ref_start_date,
           end_date: filters.ref_end_date
         });
         setReferralReport(response.data);
       } else if (activeTab === 'wallet') {
-        const response = await adminAPI.getWalletReport(1, {
+        const response = await adminAPI.getWalletReport(pageNum, {
           type: filters.type,
           status: filters.status
         });
         setWalletReport(response.data);
       } else if (activeTab === 'userFinancial') {
-        const response = await adminAPI.getUserFinancialReport(1, {
+        const response = await adminAPI.getUserFinancialReport(pageNum, {
           search: filters.search
         });
         setUserFinancialReport(response.data);
@@ -68,29 +72,25 @@ const AdminReports = () => {
 
   const handleFilter = (e) => {
     e.preventDefault();
-    fetchReports();
+    setPage(1);
+    fetchReports(1);
   };
 
-  const getExportData = () => {
-    if (activeTab === 'sales' && salesReport) {
-      return salesReport.orders_by_status || [];
+  // Loop every page of a paginated report endpoint and accumulate rows so
+  // exports always contain the full dataset, not just the visible page.
+  const fetchAllRows = async (fetchFn, rowKey) => {
+    const all = [];
+    let p = 1;
+    while (true) {
+      const res = await fetchFn(p);
+      const data = res.data;
+      const rows = data[rowKey] || [];
+      all.push(...rows);
+      const pages = data.pages || 1;
+      if (p >= pages || rows.length === 0) break;
+      p++;
     }
-    if (activeTab === 'salary' && salaryReport) {
-      return salaryReport.monthly_summary || [];
-    }
-    if (activeTab === 'liability' && liabilityReport) {
-      return liabilityReport.liability_by_status || [];
-    }
-    if (activeTab === 'referrals' && referralReport) {
-      return referralReport.users || [];
-    }
-    if (activeTab === 'wallet' && walletReport) {
-      return walletReport.transactions || [];
-    }
-    if (activeTab === 'userFinancial' && userFinancialReport) {
-      return userFinancialReport.users || [];
-    }
-    return [];
+    return all;
   };
 
   const getExportColumns = () => {
@@ -99,7 +99,7 @@ const AdminReports = () => {
     }
     if (activeTab === 'salary') {
       return [
-        { key: 'month', label: 'Month' },
+        { key: 'payout_date', label: 'Date' },
         { key: 'pending_count', label: 'Pending Count' },
         { key: 'pending_amount', label: 'Pending Amount' },
         { key: 'paid_count', label: 'Paid Count' },
@@ -110,8 +110,8 @@ const AdminReports = () => {
       return [
         { key: 'status', label: 'Status' },
         { key: 'cycle_count', label: 'Cycle Count' },
-        { key: 'total_months_paid', label: 'Months Paid' },
-        { key: 'remaining_months', label: 'Remaining Months' },
+        { key: 'total_days_paid', label: 'Days Paid' },
+        { key: 'remaining_days', label: 'Remaining Days' },
         { key: 'remaining_liability', label: 'Remaining Liability' }
       ];
     }
@@ -148,6 +148,41 @@ const AdminReports = () => {
       ];
     }
     return [];
+  };
+
+  // Fetch the full dataset for the active tab (all pages, not just the
+  // visible one) so exports contain everything. Returns the rows array.
+  const fetchAllForExport = async () => {
+    let rows = [];
+    if (activeTab === 'sales' && salesReport) {
+      rows = salesReport.orders_by_status || [];
+    } else if (activeTab === 'salary' && salaryReport) {
+      rows = salaryReport.daily_summary || [];
+    } else if (activeTab === 'liability' && liabilityReport) {
+      rows = liabilityReport.liability_by_status || [];
+    } else if (activeTab === 'referrals') {
+      rows = await fetchAllRows(
+        (p) => adminAPI.getReferralReport(p, {
+          start_date: filters.ref_start_date,
+          end_date: filters.ref_end_date
+        }),
+        'users'
+      );
+    } else if (activeTab === 'wallet') {
+      rows = await fetchAllRows(
+        (p) => adminAPI.getWalletReport(p, { type: filters.type, status: filters.status }),
+        'transactions'
+      );
+    } else if (activeTab === 'userFinancial') {
+      rows = await fetchAllRows(
+        (p) => adminAPI.getUserFinancialReport(p, { search: filters.search }),
+        'users'
+      );
+    }
+    if (rows.length === 0) {
+      toast.info('No data to export');
+    }
+    return rows;
   };
 
   const formatDateTime = (dateString) => {
@@ -275,17 +310,17 @@ const AdminReports = () => {
             </form>
           </div>
 
-          {/* Monthly Summary */}
+          {/* Daily Summary */}
           <div className="card">
             <div className="card-header">
-              <h3 className="card-title">Monthly Summary - {salaryReport.year}</h3>
+              <h3 className="card-title">Daily Payout Summary - {salaryReport.year}</h3>
             </div>
             <div className="table-container">
-              {salaryReport.monthly_summary?.length > 0 ? (
+              {salaryReport.daily_summary?.length > 0 ? (
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Month</th>
+                      <th>Date</th>
                       <th>Pending Count</th>
                       <th>Pending Amount</th>
                       <th>Paid Count</th>
@@ -293,13 +328,13 @@ const AdminReports = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {salaryReport.monthly_summary.map((item, idx) => (
+                    {salaryReport.daily_summary.map((item, idx) => (
                       <tr key={idx}>
-                        <td className="font-medium">{item.month}</td>
+                        <td className="font-medium">{item.payout_date ? new Date(item.payout_date).toLocaleDateString() : '-'}</td>
                         <td>{item.pending_count}</td>
-                        <td className="text-warning">₹{item.pending_amount?.toLocaleString()}</td>
+                        <td className="text-warning">₹{Number(item.pending_amount || 0).toLocaleString()}</td>
                         <td>{item.paid_count}</td>
-                        <td className="text-success">₹{item.paid_amount?.toLocaleString()}</td>
+                        <td className="text-success">₹{Number(item.paid_amount || 0).toLocaleString()}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -340,8 +375,8 @@ const AdminReports = () => {
                     <tr>
                       <th>Status</th>
                       <th>Cycle Count</th>
-                      <th>Months Paid</th>
-                      <th>Remaining Months</th>
+                      <th>Days Paid</th>
+                      <th>Remaining Days</th>
                       <th>Remaining Liability</th>
                     </tr>
                   </thead>
@@ -357,8 +392,8 @@ const AdminReports = () => {
                           </span>
                         </td>
                         <td>{item.cycle_count}</td>
-                        <td>{item.total_months_paid}</td>
-                        <td>{item.remaining_months}</td>
+                        <td>{item.total_days_paid}</td>
+                        <td>{item.remaining_days}</td>
                         <td className="font-semibold text-primary">₹{item.remaining_liability?.toLocaleString()}</td>
                       </tr>
                     ))}
@@ -413,7 +448,8 @@ const AdminReports = () => {
               <button type="submit" className="btn btn-primary">Apply Filter</button>
               <button type="button" className="btn btn-ghost" onClick={() => {
                 setFilters({ ...filters, ref_start_date: '', ref_end_date: '' });
-                setTimeout(fetchReports, 100);
+                setPage(1);
+                setTimeout(() => fetchReports(1), 100);
               }}>Clear</button>
             </form>
           </div>
@@ -475,6 +511,12 @@ const AdminReports = () => {
                 <p className="text-muted">No users with referrals found</p>
               )}
             </div>
+            <Pagination
+              page={page}
+              totalPages={referralReport.pages || 1}
+              total={referralReport.total || 0}
+              onChange={(p) => { setPage(p); fetchReports(p); }}
+            />
           </div>
         </div>
       );
@@ -531,7 +573,8 @@ const AdminReports = () => {
               <button type="submit" className="btn btn-primary">Apply Filter</button>
               <button type="button" className="btn btn-ghost" onClick={() => {
                 setFilters({ ...filters, type: '', status: '' });
-                setTimeout(fetchReports, 100);
+                setPage(1);
+                setTimeout(() => fetchReports(1), 100);
               }}>Clear</button>
             </form>
           </div>
@@ -573,7 +616,7 @@ const AdminReports = () => {
                         <td className={`font-semibold ${tx.type === 'deposit' ? 'text-success' : 'text-danger'}`}>
                           {tx.type === 'deposit' ? '+' : '-'}₹{parseFloat(tx.amount).toLocaleString()}
                         </td>
-                        <td style={{color: '#000'}}>{tx.payment_id || '-'}</td>
+                        <td style={{color: '#000'}} className="payment-id-cell">{tx.payment_id || '-'}</td>
                         <td>
                           <span className={`badge ${tx.status === 'completed' ? 'badge-success' : tx.status === 'pending' ? 'badge-warning' : 'badge-danger'}`}>
                             {tx.status}
@@ -588,6 +631,12 @@ const AdminReports = () => {
                 <p className="text-muted">No transactions found</p>
               )}
             </div>
+            <Pagination
+              page={page}
+              totalPages={walletReport.pages || 1}
+              total={walletReport.total || 0}
+              onChange={(p) => { setPage(p); fetchReports(p); }}
+            />
           </div>
         </div>
       );
@@ -638,7 +687,8 @@ const AdminReports = () => {
               <button type="submit" className="btn btn-primary">Search</button>
               <button type="button" className="btn btn-ghost" onClick={() => {
                 setFilters({ ...filters, search: '' });
-                setTimeout(fetchReports, 100);
+                setPage(1);
+                setTimeout(() => fetchReports(1), 100);
               }}>Clear</button>
             </form>
           </div>
@@ -694,6 +744,12 @@ const AdminReports = () => {
                 <p className="text-muted">No users found</p>
               )}
             </div>
+            <Pagination
+              page={page}
+              totalPages={userFinancialReport.pages || 1}
+              total={userFinancialReport.total || 0}
+              onChange={(p) => { setPage(p); fetchReports(p); }}
+            />
           </div>
         </div>
       );
@@ -710,11 +766,11 @@ const AdminReports = () => {
             <p className="page-subtitle">Analytics and financial insights</p>
           </div>
           <div className="page-header-actions">
-            <ExportButton
-              data={getExportData()}
+            <ExportMenu
+              fetchAll={fetchAllForExport}
               columns={getExportColumns()}
               filename={`${activeTab}-report`}
-              label="Export CSV"
+              title="Blisswell Report"
             />
           </div>
         </div>
@@ -853,10 +909,24 @@ const AdminReports = () => {
         .user-email {
           font-size: 0.75rem;
           color: #6b7280;
+          display: inline-block;
+          max-width: 160px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          vertical-align: bottom;
         }
 
         .font-mono {
           font-family: monospace;
+        }
+
+        .payment-id-cell {
+          font-family: monospace;
+          max-width: 140px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .datetime-cell {

@@ -69,7 +69,7 @@ const WalletDeposit = () => {
 
     setLoading(true);
     try {
-      const response = await adminAPI.addWalletBalance({
+      await adminAPI.addWalletBalance({
         userId: selectedUser.id,
         amount: parseFloat(amount),
         description: description || `Admin deposit`,

@@ -11,7 +11,7 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const { siteName, siteLogo, siteTagline, refreshSettings } = useSiteSettings();
+  const { siteName, siteLogo, siteTagline } = useSiteSettings();
 
   // Close sidebar on route change (mobile)
   useEffect(() => {

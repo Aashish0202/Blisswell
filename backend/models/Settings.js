@@ -71,9 +71,10 @@ const Settings = {
     const settings = await this.getAll();
     return {
       package_price: parseFloat(settings.package_price) || parseFloat(process.env.DEFAULT_PACKAGE_PRICE) || 2100,
-      salary_amount: parseFloat(settings.salary_amount) || parseFloat(process.env.DEFAULT_SALARY_AMOUNT) || 100,
-      salary_duration: parseInt(settings.salary_duration) || parseInt(process.env.DEFAULT_SALARY_DURATION) || 12,
-      closing_day: parseInt(settings.closing_day) || parseInt(process.env.DEFAULT_CLOSING_DAY) || 25,
+      default_daily_amount: parseFloat(settings.default_daily_amount) || parseFloat(process.env.DEFAULT_DAILY_AMOUNT) || 50,
+      default_days: parseInt(settings.default_days) || parseInt(process.env.DEFAULT_DAYS) || 15,
+      min_payout_amount: parseFloat(settings.min_payout_amount) || parseFloat(process.env.MIN_PAYOUT_AMOUNT) || 500,
+      payout_day: parseInt(settings.payout_day, 10) >= 0 && parseInt(settings.payout_day, 10) <= 6 ? parseInt(settings.payout_day, 10) : 1,
       repurchase_enabled: settings.repurchase_enabled === 'true'
     };
   },
@@ -82,9 +83,10 @@ const Settings = {
   async updatePackageSettings(data) {
     const settings = {};
     if (data.package_price !== undefined) settings.package_price = data.package_price.toString();
-    if (data.salary_amount !== undefined) settings.salary_amount = data.salary_amount.toString();
-    if (data.salary_duration !== undefined) settings.salary_duration = data.salary_duration.toString();
-    if (data.closing_day !== undefined) settings.closing_day = data.closing_day.toString();
+    if (data.default_daily_amount !== undefined) settings.default_daily_amount = data.default_daily_amount.toString();
+    if (data.default_days !== undefined) settings.default_days = data.default_days.toString();
+    if (data.min_payout_amount !== undefined) settings.min_payout_amount = data.min_payout_amount.toString();
+    if (data.payout_day !== undefined) settings.payout_day = String(parseInt(data.payout_day, 10) || 0);
     if (data.repurchase_enabled !== undefined) settings.repurchase_enabled = data.repurchase_enabled.toString();
 
     await this.setMultiple(settings);

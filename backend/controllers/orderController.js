@@ -105,10 +105,13 @@ exports.purchaseProduct = async (req, res) => {
     // Generate invoice number with new format: BSW + sequential + userId
     const invoiceNumber = await generateInvoiceNumber(connection, userId); //here
 
-    // Create order
+    // Create order (wallet purchases settle instantly — balance is already
+    // deducted and the package activated in this transaction — so the order is
+    // 'delivered', not 'processing'. 'processing' is reserved for gateway
+    // payments that are still pending verification.)
     const [orderResult] = await connection.execute(
       `INSERT INTO orders (user_id, product_id, amount, payment_type, status, order_number)
-       VALUES (?, ?, ?, 'wallet', 'processing', ?)`,
+       VALUES (?, ?, ?, 'wallet', 'delivered', ?)`,
       [userId, product.id, product.price, invoiceNumber] //here
     );
     const orderId = orderResult.insertId;
@@ -152,19 +155,18 @@ exports.purchaseProduct = async (req, res) => {
           );
 
           if (existingCycles.length === 0) {
-            // Use product-specific salary settings
-            const productSalaryAmount = product.salary_amount || 100;
-            const productSalaryDuration = product.salary_duration || 12;
-            const now = new Date();
-            const startMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+            // Use product-specific daily incentive settings
+            const productDailyAmount = product.daily_amount || product.salary_amount || 100;
+            const productDays = product.days || product.salary_duration || 12;
+            const startDate = new Date();
 
             await connection.execute(
-              `INSERT INTO salary_cycles (sponsor_id, referral_id, start_month, monthly_amount, duration, status)
-               VALUES (?, ?, ?, ?, ?, 'active')`,
-              [user.referred_by, userId, startMonth, productSalaryAmount, productSalaryDuration]
+              `INSERT INTO salary_cycles (sponsor_id, referral_id, start_date, daily_amount, days, days_paid, status)
+               VALUES (?, ?, ?, ?, ?, 0, 'active')`,
+              [user.referred_by, userId, startDate, productDailyAmount, productDays]
             );
 
-            console.log('Salary cycle created for referrer');
+            console.log('Daily incentive cycle created for referrer');
           }
         }
 
@@ -219,13 +221,16 @@ exports.getMyOrders = async (req, res) => {
     console.log('[User Orders] Fetching orders for user:', req.user.id);
 
     const orders = await Order.getByUserId(req.user.id, page, limit);
+    const total = await Order.countByUserId(req.user.id);
 
-    console.log('[User Orders] Orders found:', orders.length);
+    console.log('[User Orders] Orders found:', orders.length, 'Total:', total);
 
     res.json({
       orders,
       page,
-      limit
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit))
     });
   } catch (error) {
     console.error('Get orders error:', error);
@@ -496,16 +501,15 @@ exports.verifyAndPurchase = async (req, res) => {
           );
 
           if (existingCycles.length === 0) {
-            // Use product-specific salary settings
-            const productSalaryAmount = product.salary_amount || 100;
-            const productSalaryDuration = product.salary_duration || 12;
-            const now = new Date();
-            const startMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+            // Use product-specific daily incentive settings
+            const productDailyAmount = product.daily_amount || product.salary_amount || 100;
+            const productDays = product.days || product.salary_duration || 12;
+            const startDate = new Date();
 
             await connection.execute(
-              `INSERT INTO salary_cycles (sponsor_id, referral_id, start_month, monthly_amount, duration, status)
-               VALUES (?, ?, ?, ?, ?, 'active')`,
-              [user.referred_by, userId, startMonth, productSalaryAmount, productSalaryDuration]
+              `INSERT INTO salary_cycles (sponsor_id, referral_id, start_date, daily_amount, days, days_paid, status)
+               VALUES (?, ?, ?, ?, ?, 0, 'active')`,
+              [user.referred_by, userId, startDate, productDailyAmount, productDays]
             );
           }
         }

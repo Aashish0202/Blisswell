@@ -13,10 +13,12 @@ const orderRoutes = require('./routes/orderRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const ticketRoutes = require('./routes/ticketRoutes');
 const galleryRoutes = require('./routes/galleryRoutes');
+const contactRoutes = require('./routes/contactRoutes');
 const Settings = require('./models/Settings');
 
 // Import cron
-const { initSalaryCron } = require('./cron/salaryClosing');
+const { initDailyIncentiveCron } = require('./cron/dailyIncentiveCron');
+const { initExpireProcessingOrdersCron } = require('./cron/expireProcessingOrders');
 
 const app = express();
 
@@ -83,6 +85,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/gallery', galleryRoutes);
+app.use('/api/contact', contactRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -173,7 +176,8 @@ app.listen(PORT, () => {
   console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
 
   // Initialize cron jobs
-  initSalaryCron();
+  initDailyIncentiveCron();
+  initExpireProcessingOrdersCron();
 });
 
 module.exports = app;

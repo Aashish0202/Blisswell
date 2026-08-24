@@ -4,6 +4,8 @@ import { adminAPI } from '../../utils/api';
 import AdminLayout from '../../components/AdminLayout';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
+import Pagination from '../../components/Pagination';
+import ExportMenu from '../../components/ExportMenu';
 
 const AdminBonus = () => {
   const [activeTab, setActiveTab] = useState('report');
@@ -13,23 +15,32 @@ const AdminBonus = () => {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [filters, setFilters] = useState({ search: '', status: 'pending' });
 
   useEffect(() => {
-    fetchData();
+    setPage(1);
+    fetchData(1);
+    // eslint-disable-next-line
   }, [activeTab]);
 
-  const fetchData = async () => {
+  const fetchData = async (pageNum = page) => {
     setLoading(true);
     try {
       if (activeTab === 'report') {
-        const response = await adminAPI.getBusinessBonusReport(1, filters);
+        const response = await adminAPI.getBusinessBonusReport(pageNum, filters);
         setBonuses(response.data.bonuses || []);
         setSummary(response.data.summary);
+        setTotalPages(response.data.pages || 1);
+        setTotal(response.data.total || 0);
       } else if (activeTab === 'payouts') {
         const response = await adminAPI.getBonusPayouts(filters);
         setPayouts(response.data.payouts || []);
         setSummary(response.data.summary);
+        setTotalPages(1);
+        setTotal(response.data.payouts ? response.data.payouts.length : 0);
       }
     } catch (error) {
       toast.error('Failed to load data');
@@ -40,7 +51,8 @@ const AdminBonus = () => {
 
   const handleFilter = (e) => {
     e.preventDefault();
-    fetchData();
+    setPage(1);
+    fetchData(1);
   };
 
   const updatePayoutStatus = async (payoutId, status) => {
@@ -148,9 +160,36 @@ const AdminBonus = () => {
                 style={{ flex: 1 }}
               />
               <button type="submit" className="btn btn-primary">Search</button>
-              <button type="button" className="btn btn-ghost" onClick={() => { setFilters({ ...filters, search: '' }); fetchData(); }}>
+              <button type="button" className="btn btn-ghost" onClick={() => { setFilters({ ...filters, search: '' }); setPage(1); fetchData(1); }}>
                 Clear
               </button>
+              <ExportMenu
+                fetchAll={async () => {
+                  const all = [];
+                  let p = 1, tp = 1;
+                  while (p <= tp) {
+                    const res = await adminAPI.getBusinessBonusReport(p, filters);
+                    all.push(...(res.data.bonuses || []));
+                    tp = res.data.pages || Math.ceil((res.data.total || all.length) / 20);
+                    p++;
+                  }
+                  if (all.length === 0) toast.info('No bonus records to export');
+                  return all;
+                }}
+                columns={[
+                  { key: 'name', label: 'User' },
+                  { key: 'email', label: 'Email' },
+                  { key: 'referral_code', label: 'User ID' },
+                  { key: 'total_direct_business', label: 'Direct Business' },
+                  { key: 'bonus_earned', label: 'Bonus Earned' },
+                  { key: 'pending_bonus', label: 'Pending' },
+                  { key: 'paid_bonus', label: 'Paid' },
+                  { key: 'pan_status', label: 'PAN Status' },
+                  { key: 'kyc_status', label: 'KYC Status' }
+                ]}
+                filename="business-bonus-report"
+                title="Blisswell Business Bonus Report"
+              />
             </form>
 
             {bonuses.length > 0 ? (
@@ -209,6 +248,12 @@ const AdminBonus = () => {
             ) : (
               <EmptyState icon="💰" title="No bonus records" description="Bonus records will appear when users have direct business" />
             )}
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              onChange={(p) => { setPage(p); fetchData(p); }}
+            />
           </div>
         </div>
       );

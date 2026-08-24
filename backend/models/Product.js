@@ -28,7 +28,7 @@ const Product = {
 
   // Create product
   async create(productData) {
-    const { name, description, price, salary_amount, salary_duration, image, images, is_active } = productData;
+    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link, is_active } = productData;
 
     // Handle images: prioritize new images array, fallback to single image
     let imagesJson = null;
@@ -43,16 +43,19 @@ const Product = {
     }
 
     const [result] = await pool.execute(
-      `INSERT INTO products (name, description, price, salary_amount, salary_duration, image, images, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (name, description, price, salary_amount, salary_duration, daily_amount, days, image, images, youtube_link, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         description,
         price,
-        salary_amount || 100.00,
-        salary_duration || 12,
+        salary_amount != null ? salary_amount : (daily_amount || 100.00),
+        salary_duration != null ? salary_duration : (days || 12),
+        daily_amount || 100.00,
+        days || 12,
         singleImage,
         imagesJson,
+        youtube_link || null,
         is_active !== undefined ? is_active : true
       ]
     );

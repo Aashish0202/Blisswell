@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { Provider, useDispatch, useSelector } from 'react-redux';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -13,6 +13,7 @@ import Footer from './components/Footer';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
 import SiteSettingsProvider from './components/SiteSettingsProvider';
+import IdleLogout from './components/IdleLogout';
 
 // Pages
 import Home from './pages/Home';
@@ -60,7 +61,7 @@ import ImageTest from './pages/user/ImageTest';
 // Auth loader component to verify token on app start
 const AuthLoader = ({ children }) => {
   const dispatch = useDispatch();
-  const { token, isAuthenticated, loading } = useSelector((state) => state.auth);
+  const { token, loading } = useSelector((state) => state.auth);
 
   useEffect(() => {
     // Always verify token on app start if exists
@@ -68,6 +69,7 @@ const AuthLoader = ({ children }) => {
     if (token && !loading) {
       dispatch(loadUser());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on app mount
 
   return children;
@@ -121,6 +123,7 @@ function App() {
           <AuthLoader>
             <div className="app">
               <ScrollToTop />
+              <IdleLogout />
               <AppLayout>
                 <Routes>
                   {/* Public Routes */}

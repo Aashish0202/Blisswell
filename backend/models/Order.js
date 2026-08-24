@@ -39,9 +39,34 @@ const Order = {
        FROM orders o
        LEFT JOIN products p ON o.product_id = p.id
        WHERE o.user_id = ?
+         AND o.status IN ('delivered', 'shipped', 'cancelled')
        ORDER BY o.created_at DESC
        LIMIT ? OFFSET ?`,
       [userId, limit, offset]
+    );
+    return rows;
+  },
+
+  // Count orders by user ID (matches getByUserId status filter, for pagination)
+  async countByUserId(userId) {
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) as total FROM orders
+       WHERE user_id = ? AND status IN ('delivered', 'shipped', 'cancelled')`,
+      [userId]
+    );
+    return rows[0].total;
+  },
+
+  // Get a user's purchases (product name + price + date) — used to show a
+  // sponsor what their referral bought. Returns all non-cancelled orders.
+  async getPurchasesByUserId(userId) {
+    const [rows] = await pool.execute(
+      `SELECT p.name as product_name, o.amount as price, o.created_at as purchase_date, o.status
+       FROM orders o
+       LEFT JOIN products p ON o.product_id = p.id
+       WHERE o.user_id = ? AND o.status != 'cancelled'
+       ORDER BY o.created_at DESC`,
+      [userId]
     );
     return rows;
   },
@@ -58,10 +83,12 @@ const Order = {
     `;
     const params = [];
 
-    // Exclude processing, pending, and failed orders by default (cancelled/failed payments should not show)
-    // Only show orders that have completed payment flow: shipped, delivered, cancelled (after delivery)
+    // By default only show orders with a completed payment flow (delivered, shipped,
+    // cancelled-after-delivery). Orders where payment was merely initiated but never
+    // completed (processing / pending / failed) are hidden — they should not appear
+    // in the orders list. When an admin explicitly filters by a status, honor it.
     if (!filters.status) {
-      query += " AND o.status NOT IN ('processing', 'failed', 'pending')";
+      query += " AND o.status IN ('delivered', 'shipped', 'cancelled')";
     }
 
     if (filters.status) {
@@ -93,9 +120,9 @@ const Order = {
     let query = "SELECT COUNT(*) as total FROM orders WHERE 1=1";
     const params = [];
 
-    // Exclude processing, pending, and failed orders by default
+    // By default only count orders with a completed payment flow (see getAll).
     if (!filters.status) {
-      query += " AND status NOT IN ('processing', 'failed', 'pending')";
+      query += " AND status IN ('delivered', 'shipped', 'cancelled')";
     }
 
     if (filters.status) {
@@ -123,6 +150,57 @@ const Order = {
     );
   },
 
+  // Expire orders stuck in 'processing' (payment initiated but never completed)
+  // for longer than `timeoutMinutes`. Marks them 'failed' and also fails the
+  // matching pending 'purchase' wallet_transactions so they don't pile up.
+  async expireStuckProcessingOrders(timeoutMinutes = 30) {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // Select first so we can return the affected ids + count
+      const [stuck] = await conn.execute(
+        `SELECT id, order_number, user_id, amount
+         FROM orders
+         WHERE status = 'processing'
+           AND TIMESTAMPDIFF(MINUTE, created_at, NOW()) > ?
+         FOR UPDATE`,
+        [timeoutMinutes]
+      );
+
+      if (!stuck.length) {
+        await conn.commit();
+        return { count: 0, order_ids: [] };
+      }
+
+      const ids = stuck.map((r) => r.id);
+
+      // Mark orders as failed
+      await conn.execute(
+        `UPDATE orders SET status = 'failed' WHERE id IN (${ids.map(() => '?').join(',')})`,
+        ids
+      );
+
+      // Mark the matching pending purchase wallet_transactions as failed
+      await conn.execute(
+        `UPDATE wallet_transactions
+         SET status = 'failed'
+         WHERE status = 'pending'
+           AND type = 'purchase'
+           AND CAST(order_id AS UNSIGNED) IN (${ids.map(() => '?').join(',')})`,
+        ids
+      );
+
+      await conn.commit();
+      return { count: stuck.length, order_ids: ids };
+    } catch (error) {
+      await conn.rollback();
+      throw error;
+    } finally {
+      conn.release();
+    }
+  },
+
   // Get order by order number
   async getByOrderNumber(orderNumber) {
     const [rows] = await pool.execute(
@@ -132,9 +210,10 @@ const Order = {
     return rows[0];
   },
 
-  // Get total sales
+  // Get total sales (only orders that actually completed payment; abandoned /
+  // failed / pending-payment orders never generated revenue and must be excluded)
   async getTotalSales(startDate = null, endDate = null) {
-    let query = 'SELECT SUM(amount) as total FROM orders WHERE status != "cancelled"';
+    let query = "SELECT SUM(amount) as total FROM orders WHERE status IN ('delivered', 'shipped')";
     const params = [];
 
     if (startDate && endDate) {
@@ -154,12 +233,14 @@ const Order = {
     return rows;
   },
 
-  // Get recent orders
+  // Get recent orders (only completed-payment orders — abandoned/cancelled-payment
+  // orders are excluded so they don't surface on dashboards)
   async getRecent(limit = 10) {
     const [rows] = await pool.execute(
       `SELECT o.*, u.name as user_name
        FROM orders o
        LEFT JOIN users u ON o.user_id = u.id
+       WHERE o.status IN ('delivered', 'shipped', 'cancelled')
        ORDER BY o.created_at DESC
        LIMIT ?`,
       [limit]

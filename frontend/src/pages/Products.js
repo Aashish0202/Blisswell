@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { orderAPI } from '../utils/api';
-import { useSiteSettings } from '../components/SiteSettingsProvider';
-import PurchaseModal from '../components/PurchaseModal';
 
 // Image Slider Component for products with multiple images
 const ImageSlider = ({ images, getImageUrl, alt }) => {
@@ -47,10 +45,19 @@ const Products = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isVisible, setIsVisible] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
-  const { siteName } = useSiteSettings();
+  const [filter, setFilter] = useState('All');
   const navigate = useNavigate();
+
+  const matchesFilter = (product, f) => {
+    if (f === 'All') return true;
+    const hay = `${product.name || ''} ${product.description || ''}`.toLowerCase();
+    if (f === 'Cotton') return hay.includes('cotton');
+    if (f === 'Premium') return hay.includes('premium');
+    if (f === 'Bestseller') return !!(product.is_bestseller || product.bestseller) || hay.includes('bestseller');
+    return true;
+  };
+
+  const filteredProducts = products.filter(p => matchesFilter(p, filter));
 
   useEffect(() => {
     fetchProducts();
@@ -73,22 +80,9 @@ const Products = () => {
     }
   };
 
-  const handleBuyNow = (product) => {
-    // Check if user is logged in
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/register');
-      return;
-    }
-    setSelectedProduct(product);
-    setShowPurchaseModal(true);
-  };
-
-  const handlePurchaseSuccess = (orderData) => {
-    setShowPurchaseModal(false);
-    setSelectedProduct(null);
-    // Navigate to orders page
-    navigate('/user/orders');
+  const handleBuyNow = () => {
+    // Always send visitors to signup — pricing is hidden on the website
+    navigate('/register');
   };
 
   const getImageUrl = (image) => {
@@ -156,13 +150,19 @@ const Products = () => {
         <div className="container">
           <div className="filter-content">
             <div className="results-count">
-              <strong>{products.length}</strong> Products
+              <strong>{filteredProducts.length}</strong> Products
             </div>
             <div className="filter-tags">
-              <span className="filter-tag active">All</span>
-              <span className="filter-tag">Cotton</span>
-              <span className="filter-tag">Premium</span>
-              <span className="filter-tag">Bestseller</span>
+              {['All', 'Cotton', 'Premium', 'Bestseller'].map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  className={`filter-tag ${filter === tag ? 'active' : ''}`}
+                  onClick={() => setFilter(tag)}
+                >
+                  {tag}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -183,9 +183,9 @@ const Products = () => {
                 </div>
               ))}
             </div>
-          ) : products.length > 0 ? (
+          ) : filteredProducts.length > 0 ? (
             <div className="products-grid">
-              {products.map((product, index) => {
+              {filteredProducts.map((product, index) => {
                 const productImages = getProductImages(product);
                 const hasMultipleImages = productImages.length > 1;
                 console.log(`Rendering ${product.name}: ${productImages.length} images, hasMultiple: ${hasMultipleImages}`);
@@ -227,11 +227,7 @@ const Products = () => {
                         <span className="feature">Hotel Grade</span>
                       </div>
                       <div className="product-footer">
-                        <div className="price-block">
-                          <span className="current-price">₹{parseFloat(product.price).toLocaleString()}</span>
-                          <span className="price-note">Inclusive of taxes</span>
-                        </div>
-                        <button className="btn-add-to-cart" onClick={() => handleBuyNow(product)}>
+                        <button className="btn-add-to-cart" onClick={handleBuyNow}>
                           <span>Buy Now</span>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M5 12h14M12 5l7 7-7 7"/>
@@ -242,6 +238,13 @@ const Products = () => {
                   </div>
                 );
               })}
+            </div>
+          ) : products.length > 0 ? (
+            <div className="no-products">
+              <div className="no-products-icon">✦</div>
+              <h3>No {filter !== 'All' ? filter.toLowerCase() : ''} products found</h3>
+              <p>Try a different filter.</p>
+              <button type="button" className="btn btn-primary" onClick={() => setFilter('All')}>View All</button>
             </div>
           ) : (
             <div className="no-products">
@@ -306,7 +309,7 @@ const Products = () => {
           <div className="cta-content">
             <div className="cta-badge">Partner Program</div>
             <h2>Earn While You Sleep</h2>
-            <p>Join our referral program and earn monthly income for every friend you refer. Start building your passive income today.</p>
+            <p>Join our referral program and earn daily incentive for every friend you refer. Start building your passive income today.</p>
             <div className="cta-buttons">
               <Link to="/register" className="btn btn-white">
                 <span>Join Now</span>
@@ -484,8 +487,10 @@ const Products = () => {
           padding: 0.5rem 1rem;
           font-size: 0.8125rem;
           font-weight: 500;
+          font-family: inherit;
           color: #525252;
           background: #f5f5f5;
+          border: none;
           border-radius: 100px;
           cursor: pointer;
           transition: all 0.2s ease;
@@ -504,21 +509,42 @@ const Products = () => {
 
         .products-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
           gap: 2rem;
         }
 
         .product-card {
+          position: relative;
           background: #fff;
           border-radius: 20px;
           overflow: hidden;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-          transition: all 0.4s ease;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 10px 30px rgba(0,0,0,0.05);
+          transition: transform 0.4s ease, box-shadow 0.4s ease;
+        }
+
+        /* Thick gradient border (always on) — masked ring follows the rounded corners */
+        .product-card::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          padding: 2px;
+          background: linear-gradient(135deg, #2563eb, #059669);
+          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+                  mask-composite: exclude;
+          pointer-events: none;
+          z-index: 3;
+          transition: padding 0.2s ease;
         }
 
         .product-card:hover {
-          transform: translateY(-8px);
-          box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+          transform: translateY(-10px);
+          box-shadow: 0 24px 48px rgba(37, 99, 235, 0.14), 0 8px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        .product-card:hover::before {
+          padding: 2.75px;
         }
 
         .product-image-container {
@@ -528,15 +554,30 @@ const Products = () => {
           overflow: hidden;
         }
 
+        /* Soft depth gradient at the bottom of the image on hover */
+        .product-image-container::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.18));
+          opacity: 0;
+          transition: opacity 0.4s ease;
+          pointer-events: none;
+        }
+
+        .product-card:hover .product-image-container::after {
+          opacity: 1;
+        }
+
         .product-image-container img {
           width: 100%;
           height: 100%;
           object-fit: cover;
-          transition: transform 0.5s ease;
+          transition: transform 0.6s ease;
         }
 
         .product-card:hover .product-image-container img {
-          transform: scale(1.05);
+          transform: scale(1.07);
         }
 
         .product-placeholder {
@@ -641,30 +682,36 @@ const Products = () => {
         }
 
         .product-content {
-          padding: 1rem;
+          padding: 1.25rem;
         }
 
         .product-category {
-          font-size: 0.75rem;
-          font-weight: 600;
+          font-size: 0.6875rem;
+          font-weight: 700;
           color: #2563eb;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-bottom: 0.25rem;
+          letter-spacing: 0.08em;
+          margin-bottom: 0.4rem;
         }
 
         .product-name {
           font-size: 1.125rem;
-          font-weight: 600;
+          font-weight: 700;
           color: #0a0a0a;
           margin: 0 0 0.5rem 0;
+          letter-spacing: -0.01em;
+          transition: color 0.2s ease;
+        }
+
+        .product-card:hover .product-name {
+          color: #2563eb;
         }
 
         .product-desc {
           font-size: 0.875rem;
           color: #525252;
           margin: 0 0 1rem 0;
-          line-height: 1.5;
+          line-height: 1.55;
           display: -webkit-box;
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
@@ -673,27 +720,28 @@ const Products = () => {
 
         .product-features {
           display: flex;
-          gap: 0.5rem;
+          gap: 0.4rem;
           margin-bottom: 1rem;
           flex-wrap: wrap;
         }
 
         .feature {
+          display: inline-flex;
+          align-items: center;
           font-size: 0.6875rem;
+          font-weight: 600;
           color: #059669;
           background: #d1fae5;
-          padding: 0.25rem 0.625rem;
+          padding: 0.3rem 0.7rem;
           border-radius: 100px;
+          border: 1px solid rgba(5, 150, 105, 0.18);
         }
 
         .product-footer {
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          padding: 1rem 0;
+          padding-top: 1rem;
           border-top: 1px solid #f5f5f5;
-          border-bottom: 1px solid #f5f5f5;
-          margin-bottom: 1rem;
         }
 
         .current-price {
@@ -711,19 +759,27 @@ const Products = () => {
         .btn-add-to-cart {
           display: inline-flex;
           align-items: center;
+          justify-content: center;
           gap: 0.5rem;
-          padding: 0.75rem 1.25rem;
-          background: #0a0a0a;
+          width: 100%;
+          padding: 0.85rem 1.5rem;
+          background: linear-gradient(135deg, #2563eb, #059669);
           color: #fff;
-          font-size: 0.8125rem;
+          font-size: 0.875rem;
           font-weight: 600;
+          letter-spacing: 0.02em;
           text-decoration: none;
+          border: none;
           border-radius: 12px;
-          transition: all 0.3s ease;
+          cursor: pointer;
+          box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+          transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
         }
 
         .btn-add-to-cart:hover {
-          background: #1a1a1a;
+          transform: translateY(-2px);
+          box-shadow: 0 10px 24px rgba(37, 99, 235, 0.38);
+          filter: brightness(1.05);
         }
 
         .btn-add-to-cart svg {
@@ -737,7 +793,7 @@ const Products = () => {
         /* Loading */
         .products-loading {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
           gap: 2rem;
         }
 
@@ -976,6 +1032,15 @@ const Products = () => {
         }
 
         @media (max-width: 768px) {
+          /* Clearer card separation on mobile so each product reads as its own card */
+          .product-card {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+          }
+
+          .product-card::before {
+            padding: 2.5px;
+          }
+
           .products-hero {
             min-height: auto;
             padding: 3rem 1.5rem;
@@ -1013,17 +1078,6 @@ const Products = () => {
           }
         }
       `}</style>
-
-      {/* Purchase Modal */}
-      <PurchaseModal
-        isOpen={showPurchaseModal}
-        onClose={() => {
-          setShowPurchaseModal(false);
-          setSelectedProduct(null);
-        }}
-        product={selectedProduct}
-        onSuccess={handlePurchaseSuccess}
-      />
     </div>
   );
 };

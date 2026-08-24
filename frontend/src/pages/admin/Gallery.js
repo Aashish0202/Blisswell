@@ -5,7 +5,6 @@ import Modal from '../../components/Modal';
 import ConfirmationDialog from '../../components/ConfirmationDialog';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
-import { adminAPI } from '../../utils/api';
 
 const API_URL = process.env.REACT_APP_API_URL;
 
@@ -36,6 +35,7 @@ const AdminGallery = () => {
 
   useEffect(() => {
     fetchImages();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterCategory]);
 
   const fetchImages = async () => {
@@ -701,6 +701,14 @@ const AdminGallery = () => {
 
           .form-row {
             grid-template-columns: 1fr;
+          }
+        }
+
+        /* Touch devices have no hover — reveal edit/delete overlay always so
+           the actions are reachable without a mouse. */
+        @media (hover: none) {
+          .image-overlay {
+            opacity: 1;
           }
         }
       `}</style>

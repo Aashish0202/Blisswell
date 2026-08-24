@@ -148,6 +148,26 @@ const getEmailTemplate = (type, data) => {
           </div>
         </div>
       `
+    },
+    contact: {
+      subject: `New Contact Form Message — ${data.subject}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #2563EB 0%, #10B981 100%); padding: 24px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: white; margin: 0;">New Contact Message</h1>
+          </div>
+          <div style="background: #f9fafb; padding: 24px; border-radius: 0 0 10px 10px;">
+            <p style="font-size: 16px; color: #374151;"><strong>From:</strong> ${data.name}</p>
+            <p style="font-size: 14px; color: #4b5563;"><strong>Email:</strong> ${data.email}</p>
+            <p style="font-size: 14px; color: #4b5563;"><strong>Phone:</strong> ${data.phone}</p>
+            <p style="font-size: 14px; color: #4b5563;"><strong>Subject:</strong> ${data.subject}</p>
+            <div style="background: white; padding: 16px; border-radius: 8px; margin: 16px 0; border-left: 4px solid #2563EB;">
+              <p style="font-size: 15px; color: #374151; margin: 0; white-space: pre-wrap;">${data.message}</p>
+            </div>
+            <p style="font-size: 13px; color: #6b7280;">Sent via the website contact form.</p>
+          </div>
+        </div>
+      `
     }
   };
 
@@ -182,6 +202,18 @@ const sendEmail = async (to, type, data) => {
     console.error('Email send error:', error);
     return { success: false, error: error.message };
   }
+};
+
+// Send a contact-form message to the admin/owner inbox
+exports.sendContactEmail = async ({ name, email, phone, subject, message, to }) => {
+  const recipient = to || process.env.CONTACT_EMAIL || process.env.SMTP_FROM || 'info@blisswell.in';
+  return sendEmail(recipient, 'contact', {
+    name: name || 'Anonymous',
+    email: email || '(not provided)',
+    phone: phone || '(not provided)',
+    subject: subject || 'No subject',
+    message: message || ''
+  });
 };
 
 // Send welcome email

@@ -205,7 +205,8 @@ const User = {
   },
 
   // Get referrals with bonus earned from each
-  async getReferralsWithBonus(userId) {
+  async getReferralsWithBonus(userId, page = 1, limit = 20) {
+    const offset = (page - 1) * limit;
     const [rows] = await pool.execute(
       `SELECT
         u.id,
@@ -223,10 +224,45 @@ const User = {
        LEFT JOIN orders o ON u.id = o.user_id
        WHERE u.referred_by = ?
        GROUP BY u.id
-       ORDER BY u.created_at DESC`,
-      [userId, userId]
+       ORDER BY u.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [userId, userId, limit, offset]
     );
     return rows;
+  },
+
+  // Count total referrals (for pagination)
+  async countReferrals(userId) {
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) as count FROM users WHERE referred_by = ?`,
+      [userId]
+    );
+    return rows[0].count;
+  },
+
+  // Aggregated referral stats for the logged-in sponsor (used by the Referrals
+  // page stat cards — correct across ALL referrals, not just the current page)
+  async getReferralSummary(userId) {
+    const [rows] = await pool.execute(
+      `SELECT
+        COUNT(u.id) as total_referrals,
+        SUM(CASE WHEN u.has_active_package = 1 THEN 1 ELSE 0 END) as active_referrals,
+        COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as total_direct_business,
+        COALESCE((SELECT SUM(sp.amount) FROM salary_payouts sp
+                  JOIN salary_cycles sc ON sp.cycle_id = sc.id
+                  WHERE sc.sponsor_id = ? AND sp.status = 'paid'), 0) as total_bonus_received
+       FROM users u
+       LEFT JOIN orders o ON u.id = o.user_id
+       WHERE u.referred_by = ?`,
+      [userId, userId]
+    );
+    const r = rows[0] || {};
+    return {
+      total_referrals: parseInt(r.total_referrals) || 0,
+      active_referrals: parseInt(r.active_referrals) || 0,
+      total_direct_business: parseFloat(r.total_direct_business) || 0,
+      total_bonus_received: parseFloat(r.total_bonus_received) || 0
+    };
   },
 
   // Count active referrals

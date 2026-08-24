@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { orderAPI, galleryAPI } from '../utils/api';
-import { useSiteSettings } from '../components/SiteSettingsProvider';
-import PurchaseModal from '../components/PurchaseModal';
 
 // Image Slider Component for products with multiple images
 const ImageSlider = ({ images, getImageUrl, alt }) => {
@@ -45,13 +43,10 @@ const ImageSlider = ({ images, getImageUrl, alt }) => {
 
 const Home = () => {
   const [products, setProducts] = useState([]);
-  const [heroImage, setHeroImage] = useState(null);
+  const [, setHeroImage] = useState(null);
   const [whyImage, setWhyImage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isVisible, setIsVisible] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
-  const { siteName, siteLogo, siteTagline } = useSiteSettings();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -136,22 +131,9 @@ const Home = () => {
     return [];
   };
 
-  const handleBuyNow = (product) => {
-    // Check if user is logged in
-    const token = localStorage.getItem('token');
-    if (!token) {
-      navigate('/register');
-      return;
-    }
-    setSelectedProduct(product);
-    setShowPurchaseModal(true);
-  };
-
-  const handlePurchaseSuccess = (orderData) => {
-    setShowPurchaseModal(false);
-    setSelectedProduct(null);
-    // Navigate to orders page
-    navigate('/user/orders');
+  const handleBuyNow = () => {
+    // Always send visitors to signup — pricing is hidden on the website
+    navigate('/register');
   };
 
   return (
@@ -366,11 +348,12 @@ const Home = () => {
                         <span>✓ 2 Pillow Covers</span>
                       </div>
                       <div className="product-pricing">
-                        <div className="price-block">
-                          <span className="current-price">₹{parseFloat(product.price).toLocaleString()}</span>
-                          <span className="price-note">Inclusive of all taxes</span>
-                        </div>
-                        <button className="btn-add" onClick={() => handleBuyNow(product)}>Buy Now</button>
+                        <button className="btn-add" onClick={handleBuyNow}>
+                          <span>Buy Now</span>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M5 12h14M12 5l7 7-7 7"/>
+                          </svg>
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -563,8 +546,8 @@ const Home = () => {
                   <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
                 </svg>
               </div>
-              <h3>Earn Monthly</h3>
-              <p>Refer friends & earn monthly income</p>
+              <h3>Earn Daily</h3>
+              <p>Refer friends & earn daily incentive</p>
             </div>
           </div>
         </div>
@@ -654,6 +637,8 @@ const Home = () => {
       </section>
 
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&display=swap');
+
         /* ============================================
            BLISSWELL - PREMIUM LIFESTYLE BRAND
            Apple-Level Design System
@@ -1201,16 +1186,37 @@ const Home = () => {
         }
 
         .product-card {
+          position: relative;
           background: #fff;
           border-radius: var(--radius-lg);
           overflow: hidden;
-          box-shadow: var(--shadow-sm);
-          transition: all var(--transition-smooth);
+          box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 10px 30px rgba(0,0,0,0.05);
+          transition: transform var(--transition-smooth), box-shadow var(--transition-smooth);
+        }
+
+        /* Thick gradient border (always on) — masked ring follows the rounded corners */
+        .product-card::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          padding: 2px;
+          background: linear-gradient(135deg, var(--color-accent), var(--color-success));
+          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+                  mask-composite: exclude;
+          pointer-events: none;
+          z-index: 3;
+          transition: padding var(--transition-fast);
         }
 
         .product-card:hover {
-          transform: translateY(-8px);
-          box-shadow: var(--shadow-lg);
+          transform: translateY(-10px);
+          box-shadow: 0 24px 48px rgba(37, 99, 235, 0.14), 0 8px 20px rgba(0, 0, 0, 0.08);
+        }
+
+        .product-card:hover::before {
+          padding: 2.75px;
         }
 
         .product-image-container {
@@ -1220,15 +1226,30 @@ const Home = () => {
           overflow: hidden;
         }
 
+        /* Soft depth gradient at the bottom of the image on hover */
+        .product-image-container::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.18));
+          opacity: 0;
+          transition: opacity var(--transition-smooth);
+          pointer-events: none;
+        }
+
+        .product-card:hover .product-image-container::after {
+          opacity: 1;
+        }
+
         .product-image-container img {
           width: 100%;
           height: 100%;
           object-fit: cover;
-          transition: transform 0.5s ease;
+          transition: transform 0.6s ease;
         }
 
         .product-card:hover .product-image-container img {
-          transform: scale(1.05);
+          transform: scale(1.07);
         }
 
         .product-placeholder {
@@ -1327,21 +1348,27 @@ const Home = () => {
         }
 
         .product-content {
-          padding: 1rem;
+          padding: 1.25rem;
         }
 
         .product-name {
-          font-size: 1rem;
-          font-weight: 600;
+          font-size: 1.0625rem;
+          font-weight: 700;
           color: var(--color-text-primary);
-          margin: 0 0 0.25rem 0;
+          margin: 0 0 0.375rem 0;
+          letter-spacing: -0.01em;
+          transition: color var(--transition-fast);
+        }
+
+        .product-card:hover .product-name {
+          color: var(--color-accent);
         }
 
         .product-desc {
           font-size: 0.8125rem;
           color: var(--color-text-muted);
-          margin: 0 0 0.75rem 0;
-          line-height: 1.5;
+          margin: 0 0 0.875rem 0;
+          line-height: 1.55;
           display: -webkit-box;
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
@@ -1350,27 +1377,28 @@ const Home = () => {
 
         .product-features {
           display: flex;
-          gap: 0.5rem;
-          margin-bottom: 0.75rem;
+          gap: 0.4rem;
+          margin-bottom: 1rem;
           flex-wrap: wrap;
         }
 
         .product-features span {
-          font-size: 0.75rem;
+          display: inline-flex;
+          align-items: center;
+          font-size: 0.6875rem;
+          font-weight: 600;
           color: var(--color-success);
           background: var(--color-success-light);
-          padding: 0.25rem 0.625rem;
+          padding: 0.3rem 0.7rem;
           border-radius: 100px;
+          border: 1px solid rgba(5, 150, 105, 0.18);
         }
 
         .product-pricing {
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          padding: 1rem 0;
+          padding-top: 0.875rem;
           border-top: 1px solid var(--color-border-light);
-          border-bottom: 1px solid var(--color-border-light);
-          margin-bottom: 1rem;
         }
 
         .current-price {
@@ -1386,18 +1414,37 @@ const Home = () => {
         }
 
         .btn-add {
-          padding: 0.75rem 1.5rem;
-          background: var(--color-bg-dark);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.5rem;
+          width: 100%;
+          padding: 0.85rem 1.5rem;
+          background: linear-gradient(135deg, var(--color-accent), var(--color-success));
           color: #fff;
-          font-size: 0.8125rem;
+          font-size: 0.875rem;
           font-weight: 600;
+          letter-spacing: 0.02em;
           text-decoration: none;
+          border: none;
           border-radius: var(--radius-md);
-          transition: all var(--transition-fast);
+          cursor: pointer;
+          box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+          transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
         }
 
         .btn-add:hover {
-          background: #1f1f1f;
+          transform: translateY(-2px);
+          box-shadow: 0 10px 24px rgba(37, 99, 235, 0.38);
+          filter: brightness(1.05);
+        }
+
+        .btn-add svg {
+          transition: transform var(--transition-fast);
+        }
+
+        .btn-add:hover svg {
+          transform: translateX(4px);
         }
 
         .products-cta {
@@ -1936,6 +1983,15 @@ const Home = () => {
         }
 
         @media (max-width: 768px) {
+          /* Clearer card separation on mobile so each product reads as its own card */
+          .product-card {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+          }
+
+          .product-card::before {
+            padding: 2.5px;
+          }
+
           .hero-premium {
             min-height: auto;
             padding: 2rem 0;
@@ -2049,21 +2105,8 @@ const Home = () => {
             justify-content: center;
           }
         }
-
-        /* Add Google Fonts link */
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&display=swap');
       `}</style>
 
-      {/* Purchase Modal */}
-      <PurchaseModal
-        isOpen={showPurchaseModal}
-        onClose={() => {
-          setShowPurchaseModal(false);
-          setSelectedProduct(null);
-        }}
-        product={selectedProduct}
-        onSuccess={handlePurchaseSuccess}
-      />
     </div>
   );
 };

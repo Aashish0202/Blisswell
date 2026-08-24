@@ -43,14 +43,6 @@ const AdminDashboard = () => {
         variant: 'info'
       });
     }
-    if (stats?.cycles?.paused > 0) {
-      alerts.push({
-        label: 'Paused Cycles',
-        count: stats.cycles.paused,
-        href: '/admin/salary?filter=paused',
-        variant: 'warning'
-      });
-    }
     return alerts;
   };
 
@@ -118,9 +110,9 @@ const AdminDashboard = () => {
             <div className="stat-label">Pending Payouts</div>
             <div className="stat-value">₹{(stats?.salary?.pending_amount || 0).toLocaleString()}</div>
             <div className="stat-subtext">
-              {stats?.salary?.pending_payouts || 0} payouts pending
+              {stats?.salary?.pending_payouts || 0} withdrawals pending
             </div>
-            <Link to="/admin/salary" className="stat-link">Process Payouts →</Link>
+            <Link to="/admin/salary" className="stat-link">Process Withdrawals →</Link>
           </div>
 
           <div className="stat-card info">
@@ -128,7 +120,7 @@ const AdminDashboard = () => {
             <div className="stat-label">Active Liability</div>
             <div className="stat-value">₹{(stats?.salary?.active_liability || 0).toLocaleString()}</div>
             <div className="stat-subtext">
-              Monthly commitment
+              Remaining incentive liability
             </div>
           </div>
         </div>
@@ -138,10 +130,6 @@ const AdminDashboard = () => {
           <div className="mini-stat">
             <span className="mini-stat-value text-success">{stats?.cycles?.active || 0}</span>
             <span className="mini-stat-label">Active Cycles</span>
-          </div>
-          <div className="mini-stat">
-            <span className="mini-stat-value text-warning">{stats?.cycles?.paused || 0}</span>
-            <span className="mini-stat-label">Paused Cycles</span>
           </div>
           <div className="mini-stat">
             <span className="mini-stat-value text-muted">{stats?.cycles?.completed || 0}</span>
@@ -176,8 +164,8 @@ const AdminDashboard = () => {
             <Link to="/admin/salary" className="quick-action-card">
               <span className="quick-action-icon">💰</span>
               <div className="quick-action-content">
-                <span className="quick-action-title">Salary Payouts</span>
-                <span className="quick-action-desc">Process monthly payouts</span>
+                <span className="quick-action-title">Withdrawals</span>
+                <span className="quick-action-desc">Process withdrawal payouts</span>
               </div>
             </Link>
             <Link to="/admin/reports" className="quick-action-card">
@@ -314,7 +302,7 @@ const AdminDashboard = () => {
         /* Quick Actions Grid */
         .quick-actions-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
           gap: 1rem;
         }
 

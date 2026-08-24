@@ -1,13 +1,18 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils';
 
 /**
- * ExportButton Component - Export data to CSV/Excel
- * @param {Array} data - Data to export
- * @param {Array} columns - Column definitions: [{ key, label }]
- * @param {string} filename - Export filename (without extension)
- * @param {string} format - Export format: 'csv' or 'xlsx'
- * @param {string} label - Button label
- * @param {boolean} disabled - Disable export
+ * ExportButton — export data to CSV, Excel (.xls), or PDF.
+ *
+ * @param {Array}   data      - rows to export (current page)
+ * @param {Array}   columns   - [{ key, label }]
+ * @param {string}  filename  - filename without extension
+ * @param {string}  format    - 'csv' | 'xlsx' | 'pdf'
+ * @param {string}  label     - button label
+ * @param {boolean} disabled  - disable export
+ * @param {Function} fetchAll - optional async () => rows[] ; if provided,
+ *                               the button fetches ALL rows on click instead
+ *                               of exporting only the current page's `data`.
  */
 const ExportButton = ({
   data = [],
@@ -15,49 +20,28 @@ const ExportButton = ({
   filename = 'export',
   format = 'csv',
   label = 'Export',
-  disabled = false
+  disabled = false,
+  fetchAll = null
 }) => {
-  const exportToCSV = () => {
-    if (data.length === 0) return;
+  const [busy, setBusy] = useState(false);
 
-    // Create CSV header
-    const headers = columns.map(col => col.label).join(',');
-
-    // Create CSV rows
-    const rows = data.map(row =>
-      columns.map(col => {
-        let value = row[col.key];
-
-        // Handle special characters and commas
-        if (typeof value === 'string') {
-          value = value.replace(/"/g, '""');
-          if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-            value = `"${value}"`;
-          }
-        }
-
-        return value ?? '';
-      }).join(',')
-    );
-
-    const csv = [headers, ...rows].join('\n');
-
-    // Create and download file
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${filename}.csv`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-  };
-
-  const handleExport = () => {
-    if (format === 'csv') {
-      exportToCSV();
-    } else {
-      // For xlsx, we'd need a library like xlsx
-      // For now, fallback to CSV
-      exportToCSV();
+  const handleExport = async () => {
+    if (busy) return;
+    try {
+      setBusy(true);
+      const rows = fetchAll ? await fetchAll() : data;
+      if (!rows || rows.length === 0) return;
+      if (format === 'xlsx') {
+        exportToExcel(rows, columns, filename);
+      } else if (format === 'pdf') {
+        await exportToPDF(rows, columns, filename, label);
+      } else {
+        exportToCSV(rows, columns, filename);
+      }
+    } catch (e) {
+      console.error('Export failed:', e);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -65,9 +49,9 @@ const ExportButton = ({
     <button
       className="btn btn-secondary btn-sm"
       onClick={handleExport}
-      disabled={disabled || data.length === 0}
+      disabled={disabled || busy || (data.length === 0 && !fetchAll)}
     >
-      <span>📥</span> {label}
+      <span>📥</span> {busy ? 'Exporting…' : label}
     </button>
   );
 };

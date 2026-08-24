@@ -10,7 +10,10 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 const AdminSettings = () => {
   const [settings, setSettings] = useState({
-    closing_day: 5,
+    min_payout_amount: 500,
+    default_daily_amount: 50,
+    default_days: 15,
+    payout_day: 1,
     repurchase_enabled: true
   });
   const [siteSettings, setSiteSettings] = useState({
@@ -34,8 +37,6 @@ const AdminSettings = () => {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [migrating, setMigrating] = useState(false);
-  const [migrationResult, setMigrationResult] = useState(null);
   const { refreshSettings } = useSiteSettings();
 
   useEffect(() => {
@@ -134,23 +135,6 @@ const AdminSettings = () => {
     } finally {
       setSaving(false);
       setShowConfirmDialog(false);
-    }
-  };
-
-  const handleMigrateInvoices = async () => {
-    if (!window.confirm('This will update all existing order numbers to the new BSW format. Continue?')) {
-      return;
-    }
-    setMigrating(true);
-    setMigrationResult(null);
-    try {
-      const response = await adminAPI.migrateInvoices();
-      setMigrationResult(response.data);
-      toast.success(response.data.message);
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Migration failed');
-    } finally {
-      setMigrating(false);
     }
   };
 
@@ -451,19 +435,65 @@ const AdminSettings = () => {
                 <h3 className="card-title">⚙️ Application Settings</h3>
               </div>
               <form onSubmit={handleSubmit}>
-                <div className="form-group">
-                  <label className="form-label">Monthly Closing Day</label>
-                  <input
-                    type="number"
-                    name="closing_day"
-                    className="form-input"
-                    value={settings.closing_day}
-                    onChange={handleChange}
-                    min="1"
-                    max="28"
-                    required
-                  />
-                  <span className="form-hint">Day of month when incentive is calculated and processed (1-28)</span>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Minimum Payout Amount (₹)</label>
+                    <input
+                      type="number"
+                      name="min_payout_amount"
+                      className="form-input"
+                      value={settings.min_payout_amount}
+                      onChange={handleChange}
+                      min="1"
+                      required
+                    />
+                    <span className="form-hint">Minimum withdrawable balance required to generate a payout</span>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Payout Closing Day</label>
+                    <select
+                      name="payout_day"
+                      className="form-input"
+                      value={settings.payout_day ?? 1}
+                      onChange={handleChange}
+                    >
+                      <option value={0}>Sunday</option>
+                      <option value={1}>Monday</option>
+                      <option value={2}>Tuesday</option>
+                      <option value={3}>Wednesday</option>
+                      <option value={4}>Thursday</option>
+                      <option value={5}>Friday</option>
+                      <option value={6}>Saturday</option>
+                    </select>
+                    <span className="form-hint">Day of the week withdrawal payouts are auto-generated for processing</span>
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Default Daily Incentive (₹)</label>
+                    <input
+                      type="number"
+                      name="default_daily_amount"
+                      className="form-input"
+                      value={settings.default_daily_amount}
+                      onChange={handleChange}
+                      min="0"
+                    />
+                    <span className="form-hint">Default daily incentive amount pre-filled for new products</span>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Default Days</label>
+                    <input
+                      type="number"
+                      name="default_days"
+                      className="form-input"
+                      value={settings.default_days}
+                      onChange={handleChange}
+                      min="1"
+                    />
+                    <span className="form-hint">Default number of days pre-filled for new products</span>
+                  </div>
                 </div>
 
                 <div className="form-group">
@@ -508,40 +538,14 @@ const AdminSettings = () => {
                 </div>
               </form>
             </div>
-
-            {/* Invoice Migration */}
-            <div className="card animate-fade-in" style={{ animationDelay: '0.25s' }}>
-              <div className="card-header">
-                <h3 className="card-title">🧾 Invoice Number Migration</h3>
-              </div>
-              <div className="migration-section">
-                <p className="migration-desc">
-                  Update existing order numbers to the new BSW format (e.g., BSW100000101).
-                </p>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={handleMigrateInvoices}
-                  disabled={migrating}
-                >
-                  {migrating ? 'Migrating...' : 'Run Migration'}
-                </button>
-                {migrationResult && (
-                  <div className="migration-result">
-                    <p className="success-text">✓ {migrationResult.message}</p>
-                    <p className="migrated-count">Total orders updated: {migrationResult.count}</p>
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
 
           {/* Info Cards */}
           <div className="info-cards">
             <div className="card info-card animate-fade-in">
               <div className="info-card-icon">📅</div>
-              <h4>Closing Day</h4>
-              <p>Incentive cycles are processed on day <strong>{settings.closing_day}</strong> of each month.</p>
+              <h4>Weekly Payout</h4>
+              <p>Withdrawal requests are auto-generated every <strong>{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][settings.payout_day ?? 1]}</strong> for users whose withdrawable balance is at least <strong>₹{settings.min_payout_amount}</strong>. Admin then marks each payout as paid.</p>
             </div>
 
             <div className="card info-card animate-fade-in" style={{ animationDelay: '0.1s' }}>
@@ -557,7 +561,7 @@ const AdminSettings = () => {
             <div className="card info-card highlight animate-fade-in" style={{ animationDelay: '0.2s' }}>
               <div className="info-card-icon">💰</div>
               <h4>Per-Product Incentive</h4>
-              <p>Configure incentive for each product individually.</p>
+              <p>Configure daily incentive & days for each product individually.</p>
               <a href="/admin/products" className="btn btn-secondary btn-sm">Manage Products →</a>
             </div>
           </div>
@@ -864,36 +868,6 @@ const AdminSettings = () => {
 
         .info-card.highlight .btn {
           margin-top: 0.75rem;
-        }
-
-        .migration-section {
-          padding: 1rem 0;
-        }
-
-        .migration-desc {
-          color: var(--gray-600);
-          margin-bottom: 1rem;
-          font-size: 0.875rem;
-        }
-
-        .migration-result {
-          margin-top: 1rem;
-          padding: 1rem;
-          background: var(--green-50);
-          border-radius: var(--radius-lg);
-          border: 1px solid var(--green-200);
-        }
-
-        .migration-result .success-text {
-          color: var(--green-700);
-          font-weight: 500;
-          margin: 0 0 0.5rem 0;
-        }
-
-        .migration-result .migrated-count {
-          color: var(--gray-600);
-          font-size: 0.875rem;
-          margin: 0;
         }
 
         @media (max-width: 1024px) {

@@ -3,7 +3,7 @@ import { toast } from 'react-toastify';
 import { adminAPI } from '../../utils/api';
 import AdminLayout from '../../components/AdminLayout';
 import DataTable from '../../components/DataTable';
-import ExportButton from '../../components/ExportButton';
+import ExportMenu from '../../components/ExportMenu';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
 
@@ -19,11 +19,13 @@ const AdminOrders = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, filters.status]);
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (overridePage, overrideFilters) => {
     setLoading(true);
+    const usePage = overridePage ?? page;
+    const useFilters = overrideFilters ?? filters;
     try {
-      console.log('[Admin Orders] Fetching orders...', { page, filters });
-      const response = await adminAPI.getOrders(page, filters);
+      console.log('[Admin Orders] Fetching orders...', { usePage, useFilters });
+      const response = await adminAPI.getOrders(usePage, useFilters);
       console.log('[Admin Orders] Response:', response.data);
       setOrders(response.data.orders || []);
       setTotalPages(response.data.pages || 1);
@@ -39,7 +41,7 @@ const AdminOrders = () => {
   const handleFilter = (e) => {
     e.preventDefault();
     setPage(1);
-    fetchOrders();
+    fetchOrders(1, filters);
   };
 
   const updateStatus = async (orderId, status) => {
@@ -51,9 +53,6 @@ const AdminOrders = () => {
       toast.error('Failed to update status');
     }
   };
-
-  // Only show these statuses - exclude processing and failed
-  const statuses = ['pending', 'shipped', 'delivered', 'cancelled'];
 
   // No processing orders alert needed since we hide them
 
@@ -178,11 +177,22 @@ const AdminOrders = () => {
             <p className="page-subtitle">Track and manage all orders</p>
           </div>
           <div className="page-header-actions">
-            <ExportButton
-              data={orders}
+            <ExportMenu
+              fetchAll={async () => {
+                const all = [];
+                let p = 1, totalPages = 1;
+                while (p <= totalPages) {
+                  const res = await adminAPI.getOrders(p, filters);
+                  all.push(...(res.data.orders || []));
+                  totalPages = res.data.pages || Math.ceil((res.data.total || all.length) / 20);
+                  p++;
+                }
+                if (all.length === 0) toast.info('No orders to export');
+                return all;
+              }}
               columns={exportColumns}
               filename="orders-export"
-              label="Export CSV"
+              title="Blisswell Orders"
             />
           </div>
         </div>

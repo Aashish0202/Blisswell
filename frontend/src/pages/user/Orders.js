@@ -1,15 +1,57 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
 import { orderAPI, userAPI } from '../../utils/api';
-import { useSelector } from 'react-redux';
 import DashboardLayout from '../../components/DashboardLayout';
 import { useSiteSettings } from '../../components/SiteSettingsProvider';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
 import PurchaseModal from '../../components/PurchaseModal';
+import Pagination from '../../components/Pagination';
 import html2pdf from 'html2pdf.js';
 
 const API_URL = process.env.REACT_APP_API_URL;
+
+// Extract YouTube video ID from various URL formats
+const getYouTubeId = (url) => {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtube\.com\/watch\?.+&v=)([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+};
+
+// YouTube Video Modal Component
+const YouTubeModal = ({ youtubeLink, onClose }) => {
+  const videoId = getYouTubeId(youtubeLink);
+  if (!videoId) return null;
+
+  return (
+    <div className="youtube-modal-overlay" onClick={onClose}>
+      <div className="youtube-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="youtube-modal-header">
+          <h3>Product Video</h3>
+          <button className="youtube-modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="youtube-modal-body">
+          <iframe
+            src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+            title="Product Video"
+            frameBorder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          ></iframe>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // Image Lightbox Component
 const ImageLightbox = ({ images, currentIndex, onClose, onNext, onPrev, getImageUrl }) => {
@@ -102,6 +144,9 @@ const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [ordersTotalPages, setOrdersTotalPages] = useState(1);
+  const [ordersTotal, setOrdersTotal] = useState(0);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
@@ -111,13 +156,28 @@ const Orders = () => {
   const [userReferralCode, setUserReferralCode] = useState('');
   const [userGstNumber, setUserGstNumber] = useState('');
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
+  const [youtubeModal, setYoutubeModal] = useState({ isOpen: false, youtubeLink: '' });
   const invoiceRef = useRef(null);
-  const { user } = useSelector((state) => state.auth);
   const { siteName, siteLogo, contact_address, contact_email, contact_phone, company_state } = useSiteSettings();
 
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    fetchOrders(ordersPage);
+  }, [ordersPage]);
+
+  const fetchOrders = async (page) => {
+    try {
+      const ordersRes = await orderAPI.getMyOrders(page);
+      setOrders(ordersRes.data.orders);
+      setOrdersTotal(ordersRes.data.total || ordersRes.data.orders.length);
+      setOrdersTotalPages(ordersRes.data.totalPages || 1);
+    } catch (error) {
+      toast.error('Failed to load orders');
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -127,6 +187,8 @@ const Orders = () => {
         userAPI.getProfile()
       ]);
       setOrders(ordersRes.data.orders);
+      setOrdersTotal(ordersRes.data.total || ordersRes.data.orders.length);
+      setOrdersTotalPages(ordersRes.data.totalPages || 1);
       setProducts(productsRes.data.products);
       if (profileRes.data?.user) {
         if (profileRes.data.user.state) {
@@ -309,9 +371,9 @@ const Orders = () => {
           {products.length > 0 ? (
             <div className="products-grid">
               {products.map((product, index) => {
-                const salaryAmount = parseFloat(product.salary_amount || 100);
-                const salaryDuration = parseInt(product.salary_duration || 12);
-                const totalPayout = salaryAmount * salaryDuration;
+                const dailyAmount = parseFloat(product.daily_amount || product.salary_amount || 50);
+                const incentiveDays = parseInt(product.days || product.salary_duration || 15);
+                const totalPayout = dailyAmount * incentiveDays;
 
                 // Get images array or fallback to single image
                 const productImages = product.images && product.images.length > 0
@@ -363,16 +425,16 @@ const Orders = () => {
                       <div className="salary-benefits-card">
                         <div className="benefit-header">
                           <span className="benefit-icon">💰</span>
-                          <span className="benefit-title">Referral Salary Benefits</span>
+                          <span className="benefit-title">Daily Referral Incentive</span>
                         </div>
                         <div className="benefit-details">
                           <div className="benefit-row">
-                            <span className="benefit-label">Sales Incentive</span>
-                            <span className="benefit-value">₹{salaryAmount.toLocaleString()}/mo</span>
+                            <span className="benefit-label">Daily Incentive</span>
+                            <span className="benefit-value">₹{dailyAmount.toLocaleString()}/day</span>
                           </div>
                           <div className="benefit-row">
                             <span className="benefit-label">Duration</span>
-                            <span className="benefit-value">{salaryDuration} months</span>
+                            <span className="benefit-value">{incentiveDays} days</span>
                           </div>
                           <div className="benefit-row highlight">
                             <span className="benefit-label">Total Earning</span>
@@ -381,6 +443,16 @@ const Orders = () => {
                         </div>
                         <p className="benefit-note">Per active referral who purchases this product</p>
                       </div>
+
+                      {product.youtube_link && (
+                        <button
+                          className="watch-video-btn"
+                          onClick={() => setYoutubeModal({ isOpen: true, youtubeLink: product.youtube_link })}
+                        >
+                          <span className="watch-video-icon">▶</span>
+                          Watch Video
+                        </button>
+                      )}
 
                       <div className="product-price-row">
                         <div className="price-section">
@@ -414,13 +486,12 @@ const Orders = () => {
           <div className="card-header">
             <h3 className="card-title">Order History</h3>
             {orders.length > 0 && (
-              <span className="badge badge-neutral">{orders.length} Orders</span>
+              <span className="badge badge-neutral">{ordersTotal} Orders</span>
             )}
           </div>
           {orders.length > 0 ? (
             <div className="orders-list">
               {orders.map((order) => {
-                const invoice = calculateInvoice(order);
                 return (
                   <div key={order.id} className="order-item">
                     <div className="order-image">
@@ -469,6 +540,14 @@ const Orders = () => {
               }}
             />
           )}
+          {ordersTotal > 0 && (
+            <Pagination
+              page={ordersPage}
+              totalPages={ordersTotalPages}
+              total={ordersTotal}
+              onChange={setOrdersPage}
+            />
+          )}
         </div>
       </div>
 
@@ -495,6 +574,14 @@ const Orders = () => {
             currentIndex: (prev.currentIndex - 1 + prev.images.length) % prev.images.length
           }))}
           getImageUrl={getImageUrl}
+        />
+      )}
+
+      {/* YouTube Video Modal */}
+      {youtubeModal.isOpen && (
+        <YouTubeModal
+          youtubeLink={youtubeModal.youtubeLink}
+          onClose={() => setYoutubeModal({ isOpen: false, youtubeLink: '' })}
         />
       )}
 
@@ -699,17 +786,37 @@ const Orders = () => {
         }
 
         .product-card-enhanced {
+          position: relative;
           background: white;
           border-radius: var(--radius-xl);
           overflow: hidden;
           box-shadow: var(--shadow-card);
-          border: 1px solid var(--gray-100);
           transition: all 0.3s;
+        }
+
+        /* Thick gradient border (always on) — matches the website product cards */
+        .product-card-enhanced::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          padding: 2px;
+          background: linear-gradient(135deg, #2563eb, #059669);
+          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+                  mask-composite: exclude;
+          pointer-events: none;
+          z-index: 3;
+          transition: padding 0.2s ease;
         }
 
         .product-card-enhanced:hover {
           transform: translateY(-4px);
           box-shadow: var(--shadow-lg);
+        }
+
+        .product-card-enhanced:hover::before {
+          padding: 2.75px;
         }
 
         .product-image-wrapper {
@@ -1002,6 +1109,116 @@ const Orders = () => {
           color: var(--gray-500);
           margin: 0.5rem 0 0 0;
           font-style: italic;
+        }
+
+        /* Watch Video Button */
+        .watch-video-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          width: 100%;
+          padding: 0.625rem 1rem;
+          margin-bottom: 1rem;
+          background: white;
+          border: 1px solid #dc2626;
+          border-radius: var(--radius-lg);
+          color: #dc2626;
+          font-size: 0.8125rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .watch-video-btn:hover {
+          background: #dc2626;
+          color: white;
+        }
+
+        .watch-video-icon {
+          width: 28px;
+          height: 28px;
+          background: #dc2626;
+          color: white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.75rem;
+          flex-shrink: 0;
+          transition: background 0.2s;
+        }
+
+        .watch-video-btn:hover .watch-video-icon {
+          background: white;
+          color: #dc2626;
+        }
+
+        /* YouTube Video Modal */
+        .youtube-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.85);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2000;
+          padding: 1rem;
+        }
+
+        .youtube-modal {
+          background: white;
+          border-radius: var(--radius-xl);
+          max-width: 800px;
+          width: 100%;
+          overflow: hidden;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .youtube-modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 1rem 1.25rem;
+          border-bottom: 1px solid var(--gray-100);
+        }
+
+        .youtube-modal-header h3 {
+          margin: 0;
+          font-size: 1rem;
+          font-weight: 600;
+          color: var(--gray-900);
+        }
+
+        .youtube-modal-close {
+          background: none;
+          border: none;
+          font-size: 1.5rem;
+          color: var(--gray-500);
+          cursor: pointer;
+          padding: 0;
+          line-height: 1;
+        }
+
+        .youtube-modal-close:hover {
+          color: var(--gray-900);
+        }
+
+        .youtube-modal-body {
+          position: relative;
+          padding-top: 56.25%; /* 16:9 aspect ratio */
+          background: #000;
+        }
+
+        .youtube-modal-body iframe {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          border: none;
         }
 
         .product-price-row {

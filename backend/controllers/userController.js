@@ -1,8 +1,11 @@
+const pool = require('../config/db');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const Order = require('../models/Order');
 const SalaryCycle = require('../models/SalaryCycle');
 const SalaryPayout = require('../models/SalaryPayout');
+const IncentiveCredit = require('../models/IncentiveCredit');
+const Settings = require('../models/Settings');
 const KYC = require('../models/KYC');
 const fs = require('fs');
 const path = require('path');
@@ -59,12 +62,12 @@ exports.getDashboard = async (req, res) => {
       console.error('Pending payouts fetch error:', e);
     }
 
-    // Get total earned
+    // Get total earned (lifetime incentive credited to the earning wallet —
+    // matches the Earning Wallet shown on the Salary page, NOT paid-out amount)
     try {
-      const allPayouts = await SalaryPayout.getAll(1, 1000, { user_id: userId });
-      totalEarned = allPayouts.filter(p => p.status === 'paid').reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+      totalEarned = parseFloat(await IncentiveCredit.getTotalByUserId(userId)) || 0;
     } catch (e) {
-      console.error('All payouts fetch error:', e);
+      console.error('Total earned fetch error:', e);
     }
 
     // Get recent orders
@@ -87,17 +90,17 @@ exports.getDashboard = async (req, res) => {
         created_at: user.created_at
       },
       wallet: {
-        balance: wallet?.balance || 0
+        balance: wallet?.balance || 0,
+        earnings_balance: wallet?.earnings_balance || 0
       },
       referrals: {
         total: totalReferrals,
         active: activeReferrals
       },
       salary: {
+        earnings_balance: wallet?.earnings_balance || 0,
         pending_amount: pendingAmount,
         total_earned: totalEarned,
-        this_month: 0,
-        last_month: 0,
         active_cycles: cycles.filter(c => c.status === 'active').length,
         completed_cycles: cycles.filter(c => c.status === 'completed').length
       },
@@ -322,7 +325,10 @@ exports.getReferrals = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
-    const referrals = await User.getReferralsWithBonus(req.user.id);
+    const total = await User.countReferrals(req.user.id);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    const referrals = await User.getReferralsWithBonus(req.user.id, page, limit);
 
     res.json({
       referrals: referrals.map(r => ({
@@ -335,10 +341,96 @@ exports.getReferrals = async (req, res) => {
         bonus_received: parseFloat(r.bonus_received || 0),
         created_at: r.created_at
       })),
-      total: referrals.length
+      total,
+      page,
+      limit,
+      totalPages
     });
   } catch (error) {
     console.error('Get referrals error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Aggregated referral stats (correct across ALL referrals, not just current page)
+exports.getReferralSummary = async (req, res) => {
+  try {
+    const summary = await User.getReferralSummary(req.user.id);
+    res.json({ summary });
+  } catch (error) {
+    console.error('Get referral summary error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Get purchases (product name, price, purchase date) for a specific referral.
+// Only allowed if the target user is actually a referral of the logged-in user.
+exports.getReferralPurchases = async (req, res) => {
+  try {
+    const referralId = parseInt(req.params.id, 10);
+    if (!referralId) {
+      return res.status(400).json({ message: 'Invalid referral id' });
+    }
+
+    // Ownership check: the requested user must have been referred by the caller
+    const [rows] = await pool.execute(
+      'SELECT id, name, referred_by FROM users WHERE id = ?',
+      [referralId]
+    );
+    const referral = rows[0];
+    if (!referral || referral.referred_by !== req.user.id) {
+      return res.status(403).json({ message: 'Not your referral' });
+    }
+
+    const purchases = await Order.getPurchasesByUserId(referralId);
+
+    res.json({
+      referral_name: referral.name,
+      purchases: purchases.map(p => ({
+        product_name: p.product_name || '—',
+        price: parseFloat(p.price || 0),
+        purchase_date: p.purchase_date,
+        status: p.status
+      }))
+    });
+  } catch (error) {
+    console.error('Get referral purchases error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Aggregated salary stats across ALL cycles/payouts (for the Salary page stat cards)
+exports.getSalarySummary = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const [cycleStats] = await pool.execute(
+      `SELECT
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_cycles,
+        COALESCE(SUM(CASE WHEN status = 'active'
+          THEN (days - days_paid) * daily_amount ELSE 0 END), 0) as remaining_incentive
+       FROM salary_cycles WHERE sponsor_id = ?`,
+      [userId]
+    );
+
+    const [payoutStats] = await pool.execute(
+      `SELECT
+        COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) as total_earned,
+        COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as pending_amount
+       FROM salary_payouts WHERE user_id = ?`,
+      [userId]
+    );
+
+    res.json({
+      summary: {
+        totalActive: parseInt(cycleStats[0].active_cycles) || 0,
+        totalEarned: parseFloat(payoutStats[0].total_earned) || 0,
+        pendingAmount: parseFloat(payoutStats[0].pending_amount) || 0,
+        remainingIncentive: parseFloat(cycleStats[0].remaining_incentive) || 0
+      }
+    });
+  } catch (error) {
+    console.error('Get salary summary error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -349,6 +441,9 @@ exports.getSalaryCycles = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
+    const total = await SalaryCycle.countBySponsor(req.user.id);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
     const cycles = await SalaryCycle.getBySponsorId(req.user.id, page, limit);
 
     res.json({
@@ -356,6 +451,11 @@ exports.getSalaryCycles = async (req, res) => {
         id: c.id,
         referral_name: c.referral_name,
         referral_email: c.referral_email,
+        start_date: c.start_date || c.start_month,
+        daily_amount: c.daily_amount,
+        days: c.days,
+        days_paid: c.days_paid,
+        // legacy fields kept for backward compatibility
         start_month: c.start_month,
         monthly_amount: c.monthly_amount,
         months_paid: c.months_paid,
@@ -363,8 +463,10 @@ exports.getSalaryCycles = async (req, res) => {
         status: c.status,
         created_at: c.created_at
       })),
+      total,
       page,
-      limit
+      limit,
+      totalPages
     });
   } catch (error) {
     console.error('Get salary cycles error:', error);
@@ -378,6 +480,9 @@ exports.getPayouts = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
+    const total = await SalaryPayout.countByUserId(req.user.id);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
     const payouts = await SalaryPayout.getByUserId(req.user.id, page, limit);
 
     res.json({
@@ -386,16 +491,40 @@ exports.getPayouts = async (req, res) => {
         referral_name: p.referral_name,
         month: p.month,
         year: p.year,
+        payout_date: p.payout_date,
+        is_withdrawal: p.cycle_id === null,
         amount: p.amount,
         status: p.status,
         paid_at: p.paid_at,
         created_at: p.created_at
       })),
+      total,
       page,
-      limit
+      limit,
+      totalPages
     });
   } catch (error) {
     console.error('Get payouts error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Get earning wallet (incentive earnings balance + min payout threshold)
+exports.getEarnings = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const earningsBalance = await Wallet.getEarnings(userId);
+    const settings = await Settings.getPackageSettings();
+    const totalEarned = await IncentiveCredit.getTotalByUserId(userId);
+
+    res.json({
+      earnings_balance: parseFloat(earningsBalance) || 0,
+      total_earned: parseFloat(totalEarned) || 0,
+      min_payout_amount: settings.min_payout_amount,
+      payout_day: settings.payout_day
+    });
+  } catch (error) {
+    console.error('Get earnings error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -406,12 +535,18 @@ exports.getWalletTransactions = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
-    const transactions = await require('../models/WalletTransaction').getByUserId(req.user.id, page, limit);
+    const WalletTransaction = require('../models/WalletTransaction');
+    const total = await WalletTransaction.countByUserId(req.user.id);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    const transactions = await WalletTransaction.getByUserId(req.user.id, page, limit);
 
     res.json({
       transactions,
+      total,
       page,
-      limit
+      limit,
+      totalPages
     });
   } catch (error) {
     console.error('Get wallet transactions error:', error);

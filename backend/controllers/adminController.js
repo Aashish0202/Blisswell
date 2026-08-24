@@ -267,6 +267,28 @@ exports.updateOrderStatus = async (req, res) => {
   }
 };
 
+// Manually expire orders stuck in 'processing' (payment initiated but never
+// completed). Optionally pass ?minutes=N to override the default 30-min window.
+exports.expireStuckOrders = async (req, res) => {
+  try {
+    const minutes = parseInt(req.query.minutes, 10);
+    const timeoutMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 30;
+    const result = await Order.expireStuckProcessingOrders(timeoutMinutes);
+
+    res.json({
+      message: result.count > 0
+        ? `Marked ${result.count} abandoned order(s) as failed (stuck in 'processing' for > ${timeoutMinutes} min)`
+        : `No stuck orders found (none in 'processing' older than ${timeoutMinutes} min)`,
+      expired_count: result.count,
+      order_ids: result.order_ids,
+      timeout_minutes: timeoutMinutes
+    });
+  } catch (error) {
+    console.error('Expire stuck orders error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+};
+
 // ==================== PRODUCT MANAGEMENT ====================
 
 // Get all products (admin)
@@ -284,16 +306,19 @@ exports.getProducts = async (req, res) => {
 // Create product
 exports.createProduct = async (req, res) => {
   try {
-    const { name, description, price, salary_amount, salary_duration, image, images } = req.body;
+    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link } = req.body;
 
     const productId = await Product.create({
       name,
       description,
       price,
-      salary_amount: salary_amount || 100,
-      salary_duration: salary_duration || 12,
+      daily_amount,
+      days,
+      salary_amount,
+      salary_duration,
       image,
       images, // New field for multiple images
+      youtube_link,
       is_active: true
     });
 
@@ -310,16 +335,19 @@ exports.createProduct = async (req, res) => {
 // Update product
 exports.updateProduct = async (req, res) => {
   try {
-    const { name, description, price, salary_amount, salary_duration, image, images, is_active } = req.body;
+    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link, is_active } = req.body;
 
     await Product.update(req.params.id, {
       name,
       description,
       price,
+      daily_amount,
+      days,
       salary_amount,
       salary_duration,
       image,
       images, // New field for multiple images
+      youtube_link,
       is_active
     });
 
@@ -355,11 +383,14 @@ exports.getSalaryCycles = async (req, res) => {
     };
 
     const cycles = await SalaryCycle.getAll(page, limit, filters);
+    const total = await SalaryCycle.countAll(filters);
 
     res.json({
       cycles,
       page,
-      limit
+      limit,
+      total,
+      pages: Math.max(1, Math.ceil(total / limit))
     });
   } catch (error) {
     console.error('Get salary cycles error:', error);
@@ -376,15 +407,19 @@ exports.getPayouts = async (req, res) => {
       status: req.query.status,
       user_id: req.query.user_id,
       month: req.query.month,
-      year: req.query.year
+      year: req.query.year,
+      date: req.query.date
     };
 
     const payouts = await SalaryPayout.getAll(page, limit, filters);
+    const total = await SalaryPayout.countAll(filters);
 
     res.json({
       payouts,
       page,
-      limit
+      limit,
+      total,
+      pages: Math.max(1, Math.ceil(total / limit))
     });
   } catch (error) {
     console.error('Get payouts error:', error);
@@ -421,17 +456,45 @@ exports.updatePayoutStatus = async (req, res) => {
   }
 };
 
-// Bulk update payouts
+// Bulk update payouts (used by the clubbed "Mark Paid" button on /admin/salary)
 exports.bulkUpdatePayouts = async (req, res) => {
   try {
     const { payout_ids, status } = req.body;
+
+    if (!Array.isArray(payout_ids) || payout_ids.length === 0) {
+      return res.status(400).json({ message: 'payout_ids must be a non-empty array' });
+    }
+    if (!['pending', 'paid'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status' });
+    }
+
     const paidAt = status === 'paid' ? new Date() : null;
+    let updated = 0;
 
     for (const id of payout_ids) {
       await SalaryPayout.updateStatus(id, status, paidAt);
+      updated++;
+
+      // Mirror single-payout handler: email the user when marked paid
+      if (status === 'paid') {
+        try {
+          const payout = await SalaryPayout.getById(id);
+          if (payout) {
+            const user = await User.findById(payout.user_id);
+            if (user) {
+              const cycle = await SalaryCycle.getById(payout.cycle_id);
+              const cycleName = cycle ? `Cycle ${cycle.id}` : 'Monthly';
+              emailService.sendPayoutEmail(user, payout.amount, cycleName)
+                .catch(err => console.error('Payout email error:', err));
+            }
+          }
+        } catch (err) {
+          console.error('Bulk payout email error:', err);
+        }
+      }
     }
 
-    res.json({ message: 'Payouts updated successfully' });
+    res.json({ message: 'Payouts updated successfully', updated });
   } catch (error) {
     console.error('Bulk update payouts error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -507,17 +570,17 @@ exports.getSalesReport = async (req, res) => {
   }
 };
 
-// Salary report
+// Salary report (daily incentive + withdrawals)
 exports.getSalaryReport = async (req, res) => {
   try {
     const { year } = req.query;
     const currentYear = year || new Date().getFullYear();
 
-    const monthlySummary = await SalaryPayout.getMonthlySummary(currentYear);
+    const dailySummary = await SalaryPayout.getDailyPayoutSummary(currentYear);
     const liabilityReport = await SalaryCycle.getLiabilityReport();
 
     res.json({
-      monthly_summary: monthlySummary,
+      daily_summary: dailySummary,
       liability_report: liabilityReport,
       year: currentYear
     });
@@ -615,13 +678,16 @@ exports.getReferralReport = async (req, res) => {
 // Get settings
 exports.getSettings = async (req, res) => {
   try {
-    const closingDay = await Settings.get('closing_day');
-    const repurchaseEnabled = await Settings.get('repurchase_enabled');
+    const settings = await Settings.getPackageSettings();
 
     res.json({
       settings: {
-        closing_day: parseInt(closingDay) || 5,
-        repurchase_enabled: repurchaseEnabled === 'true'
+        package_price: settings.package_price,
+        min_payout_amount: settings.min_payout_amount,
+        default_daily_amount: settings.default_daily_amount,
+        default_days: settings.default_days,
+        payout_day: settings.payout_day,
+        repurchase_enabled: settings.repurchase_enabled
       }
     });
   } catch (error) {
@@ -633,11 +699,34 @@ exports.getSettings = async (req, res) => {
 // Update settings
 exports.updateSettings = async (req, res) => {
   try {
-    const { closing_day, repurchase_enabled } = req.body;
+    const {
+      package_price,
+      min_payout_amount,
+      default_daily_amount,
+      default_days,
+      payout_day,
+      repurchase_enabled
+    } = req.body;
 
-    await Settings.setMultiple({
-      closing_day: closing_day?.toString(),
-      repurchase_enabled: repurchase_enabled?.toString()
+    // Changing the payout day resets the weekly idempotency marker so the new
+    // day takes effect immediately (next cron tick on/after the new day sweeps).
+    // Only reset when the day actually changes — saving unrelated settings
+    // must not perturb the payout schedule.
+    if (payout_day !== undefined) {
+      const currentPayoutDay = await Settings.get('payout_day');
+      const currentVal = currentPayoutDay != null ? parseInt(currentPayoutDay, 10) : 1;
+      if (parseInt(payout_day, 10) !== currentVal) {
+        await Settings.set('last_payout_date', '1970-01-01');
+      }
+    }
+
+    await Settings.updatePackageSettings({
+      package_price,
+      min_payout_amount,
+      default_daily_amount,
+      default_days,
+      payout_day,
+      repurchase_enabled
     });
 
     res.json({ message: 'Settings updated successfully' });
@@ -1034,7 +1123,7 @@ exports.getWalletReport = async (req, res) => {
 // Get payouts with KYC details for export
 exports.getPayoutsWithKYC = async (req, res) => {
   try {
-    const { month, year, status } = req.query;
+    const { month, year, status, date } = req.query;
 
     let query = `
       SELECT
@@ -1043,6 +1132,8 @@ exports.getPayoutsWithKYC = async (req, res) => {
         sp.status,
         sp.month,
         sp.year,
+        sp.payout_date,
+        sp.cycle_id,
         sp.created_at,
         u.id as user_id,
         u.name,
@@ -1073,7 +1164,10 @@ exports.getPayoutsWithKYC = async (req, res) => {
       query += ' AND sp.status = ?';
       params.push(status);
     }
-    if (month && year) {
+    if (date) {
+      query += ' AND sp.payout_date = ?';
+      params.push(date);
+    } else if (month && year) {
       query += ' AND sp.month = ? AND sp.year = ?';
       params.push(month, year);
     }
@@ -1106,7 +1200,7 @@ exports.getPayoutsWithKYC = async (req, res) => {
 exports.exportPayoutsExcel = async (req, res) => {
   try {
     const XLSX = require('xlsx');
-    const { month, year, status } = req.query;
+    const { month, year, status, date } = req.query;
 
     let query = `
       SELECT
@@ -1116,6 +1210,7 @@ exports.exportPayoutsExcel = async (req, res) => {
         u.referral_code as 'User ID',
         sp.amount as 'Amount',
         sp.status as 'Payout Status',
+        sp.payout_date as 'Payout Date',
         u.pan_number as 'PAN Number',
         u.pan_status as 'PAN Status',
         k.bank_name as 'Bank Name',
@@ -1140,7 +1235,10 @@ exports.exportPayoutsExcel = async (req, res) => {
       query += ' AND sp.status = ?';
       params.push(status);
     }
-    if (month && year) {
+    if (date) {
+      query += ' AND sp.payout_date = ?';
+      params.push(date);
+    } else if (month && year) {
       query += ' AND sp.month = ? AND sp.year = ?';
       params.push(month, year);
     }
@@ -1161,6 +1259,7 @@ exports.exportPayoutsExcel = async (req, res) => {
       { wch: 12 }, // User ID
       { wch: 10 }, // Amount
       { wch: 12 }, // Payout Status
+      { wch: 14 }, // Payout Date
       { wch: 15 }, // PAN Number
       { wch: 12 }, // PAN Status
       { wch: 20 }, // Bank Name

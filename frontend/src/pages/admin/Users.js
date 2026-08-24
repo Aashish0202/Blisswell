@@ -4,7 +4,7 @@ import { adminAPI } from '../../utils/api';
 import AdminLayout from '../../components/AdminLayout';
 import DataTable from '../../components/DataTable';
 import BulkActionToolbar from '../../components/BulkActionToolbar';
-import ExportButton from '../../components/ExportButton';
+import ExportMenu from '../../components/ExportMenu';
 import ConfirmationDialog from '../../components/ConfirmationDialog';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
@@ -48,10 +48,12 @@ const AdminUsers = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (overridePage, overrideFilters) => {
     setLoading(true);
+    const usePage = overridePage ?? page;
+    const useFilters = overrideFilters ?? filters;
     try {
-      const response = await adminAPI.getUsers(page, filters);
+      const response = await adminAPI.getUsers(usePage, useFilters);
       setUsers(response.data.users);
       setTotalUsers(response.data.total || response.data.users.length);
     } catch (error) {
@@ -64,7 +66,7 @@ const AdminUsers = () => {
   const handleSearch = (e) => {
     e.preventDefault();
     setPage(1);
-    fetchUsers();
+    fetchUsers(1, filters);
   };
 
   const toggleStatus = async (userId, currentStatus) => {
@@ -413,11 +415,22 @@ const AdminUsers = () => {
             <p className="page-subtitle">Manage and monitor all registered users</p>
           </div>
           <div className="page-header-actions">
-            <ExportButton
-              data={users}
+            <ExportMenu
+              fetchAll={async () => {
+                const all = [];
+                let p = 1, totalPages = 1;
+                while (p <= totalPages) {
+                  const res = await adminAPI.getUsers(p, filters);
+                  all.push(...(res.data.users || []));
+                  totalPages = res.data.pages || Math.ceil((res.data.total || all.length) / 20);
+                  p++;
+                }
+                if (all.length === 0) toast.info('No users to export');
+                return all;
+              }}
               columns={exportColumns}
               filename="users-export"
-              label="Export CSV"
+              title="Blisswell Users"
             />
           </div>
         </div>
@@ -438,9 +451,10 @@ const AdminUsers = () => {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => {
-                  setFilters({ search: '' });
+                  const cleared = { search: '' };
+                  setFilters(cleared);
                   setPage(1);
-                  setTimeout(fetchUsers, 0);
+                  fetchUsers(1, cleared);
                 }}
               >
                 Clear

@@ -29,7 +29,7 @@ const OnboardingModal = () => {
       title: 'Welcome to Blisswell!',
       description: 'Let us help you get started. This quick tour will show you how to start earning.',
       features: [
-        { icon: '💰', title: 'Earn Incentive', description: 'Get ₹100/month incentive per active referral' },
+        { icon: '💰', title: 'Earn Incentive', description: 'Get daily incentive per active referral' },
         { icon: '👥', title: 'Build Your Team', description: 'Invite friends and grow earnings' },
         { icon: '📦', title: 'Quality Products', description: 'Premium bedsheets at great prices' }
       ]
@@ -64,11 +64,11 @@ const OnboardingModal = () => {
     referral: {
       icon: '👥',
       title: 'Share & Earn',
-      description: 'Invite friends using your referral link. Earn ₹100/month for each active referral for 12 months!',
+      description: 'Invite friends using your referral link. Earn daily incentive for each active referral for the product duration!',
       features: [
         { icon: '🔗', title: 'Unique Link', description: 'Share your personal referral link' },
-        { icon: '💸', title: 'Monthly Earnings', description: '₹100 per active referral' },
-        { icon: '📅', title: '12 Months', description: 'Earn for a full year per referral' }
+        { icon: '💸', title: 'Daily Earnings', description: 'Credited daily to your earning wallet' },
+        { icon: '📅', title: 'Auto Withdrawal', description: 'Withdrawal generated at minimum payout' }
       ]
     },
     tour: {

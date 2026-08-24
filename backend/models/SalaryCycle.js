@@ -1,15 +1,15 @@
 const pool = require('../config/db');
 
 const SalaryCycle = {
-  // Create salary cycle
+  // Create salary cycle (daily incentive model)
   async create(cycleData, connection = pool) {
-    const { sponsor_id, referral_id, start_month, monthly_amount, duration } = cycleData;
+    const { sponsor_id, referral_id, start_date, daily_amount, days } = cycleData;
     const conn = connection;
     const [result] = await conn.execute(
       `INSERT INTO salary_cycles
-       (sponsor_id, referral_id, start_month, monthly_amount, duration, status)
-       VALUES (?, ?, ?, ?, ?, 'active')`,
-      [sponsor_id, referral_id, start_month, monthly_amount, duration || 12]
+       (sponsor_id, referral_id, start_date, daily_amount, days, days_paid, status)
+       VALUES (?, ?, ?, ?, ?, 0, 'active')`,
+      [sponsor_id, referral_id, start_date, daily_amount, days || 12]
     );
     return result.insertId;
   },
@@ -44,6 +44,15 @@ const SalaryCycle = {
     return rows;
   },
 
+  // Count cycles by sponsor (for pagination)
+  async countBySponsor(sponsorId) {
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) as count FROM salary_cycles WHERE sponsor_id = ?`,
+      [sponsorId]
+    );
+    return rows[0].count;
+  },
+
   // Get all cycles (admin)
   async getAll(page = 1, limit = 20, filters = {}) {
     const offset = (page - 1) * limit;
@@ -74,13 +83,31 @@ const SalaryCycle = {
     return rows;
   },
 
-  // Get active cycles for processing
+  // Count all cycles (admin) matching filters (for pagination)
+  async countAll(filters = {}) {
+    let query = `SELECT COUNT(*) as count FROM salary_cycles sc WHERE 1=1`;
+    const params = [];
+
+    if (filters.status) {
+      query += ' AND sc.status = ?';
+      params.push(filters.status);
+    }
+    if (filters.sponsor_id) {
+      query += ' AND sc.sponsor_id = ?';
+      params.push(filters.sponsor_id);
+    }
+
+    const [rows] = await pool.execute(query, params);
+    return rows[0].count;
+  },
+
+  // Get active cycles for daily processing
   async getActiveCyclesForProcessing() {
     const [rows] = await pool.execute(
       `SELECT sc.*, u.has_active_package as sponsor_active
        FROM salary_cycles sc
        JOIN users u ON sc.sponsor_id = u.id
-       WHERE sc.status = 'active' AND sc.months_paid < sc.duration`
+       WHERE sc.status = 'active' AND sc.days_paid < sc.days`
     );
     return rows;
   },
@@ -103,10 +130,18 @@ const SalaryCycle = {
     );
   },
 
-  // Increment months paid
+  // Increment months paid (legacy)
   async incrementMonthsPaid(id) {
     await pool.execute(
       'UPDATE salary_cycles SET months_paid = months_paid + 1 WHERE id = ?',
+      [id]
+    );
+  },
+
+  // Increment days paid (daily model)
+  async incrementDaysPaid(id, connection = pool) {
+    await connection.execute(
+      'UPDATE salary_cycles SET days_paid = days_paid + 1 WHERE id = ?',
       [id]
     );
   },
@@ -149,25 +184,25 @@ const SalaryCycle = {
     return rows[0].total;
   },
 
-  // Get liability report
+  // Get liability report (daily model)
   async getLiabilityReport() {
     const [rows] = await pool.execute(
       `SELECT
         status,
         COUNT(*) as cycle_count,
-        SUM(months_paid) as total_months_paid,
-        SUM(duration - months_paid) as remaining_months,
-        SUM((duration - months_paid) * monthly_amount) as remaining_liability
+        SUM(days_paid) as total_days_paid,
+        SUM(days - days_paid) as remaining_days,
+        SUM((days - days_paid) * daily_amount) as remaining_liability
        FROM salary_cycles
        GROUP BY status`
     );
     return rows;
   },
 
-  // Get total active liability
+  // Get total active liability (daily model)
   async getTotalActiveLiability() {
     const [rows] = await pool.execute(
-      `SELECT SUM((duration - months_paid) * monthly_amount) as total_liability
+      `SELECT SUM((days - days_paid) * daily_amount) as total_liability
        FROM salary_cycles
        WHERE status = 'active'`
     );

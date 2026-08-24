@@ -22,6 +22,7 @@ const IdCard = () => {
   const { user } = useSelector((state) => state.auth);
   const { siteName, siteLogo, siteTagline } = useSiteSettings();
   const cardRef = useRef(null);
+  // eslint-disable-next-line no-unused-vars
   const [downloading, setDownloading] = useState(false);
   const [profileImage, setProfileImage] = useState(null);
 
@@ -296,6 +297,7 @@ const IdCard = () => {
   };
 
   // ========== DOWNLOAD AS IMAGE (PNG) ==========
+  // eslint-disable-next-line no-unused-vars
   const downloadAsImage = async () => {
     if (loadingImages) {
       alert('Please wait for images to load completely.');
@@ -350,6 +352,7 @@ const IdCard = () => {
   };
 
   // ========== DOWNLOAD AS PDF ==========
+  // eslint-disable-next-line no-unused-vars
   const downloadAsPDF = async () => {
     if (loadingImages) {
       alert('Please wait for images to load completely.');
@@ -542,7 +545,6 @@ const IdCard = () => {
 
       // Try to convert using pre-loaded base64 first (most reliable)
       const imgClass = clonedImg.className || '';
-      const imgSrc = originalImg?.src || '';
 
       if ((imgClass.includes('card-logo') || imgClass.includes('back-logo')) && logoBase64) {
         clonedImg.src = logoBase64;

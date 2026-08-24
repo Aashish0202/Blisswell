@@ -4,58 +4,50 @@ import { userAPI } from '../../utils/api';
 import DashboardLayout from '../../components/DashboardLayout';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
+import Pagination from '../../components/Pagination';
 
 const Incentive = () => {
   const [cycles, setCycles] = useState([]);
   const [payouts, setPayouts] = useState([]);
   const [activeTab, setActiveTab] = useState('cycles');
   const [loading, setLoading] = useState(true);
+  const [earnings, setEarnings] = useState({ earnings_balance: 0, total_earned: 0, min_payout_amount: 500, payout_day: 1 });
   const [stats, setStats] = useState({
     totalActive: 0,
-    totalPaused: 0,
     totalEarned: 0,
     pendingAmount: 0,
     remainingIncentive: 0
   });
+  const [cyclesPage, setCyclesPage] = useState(1);
+  const [cyclesTotalPages, setCyclesTotalPages] = useState(1);
+  const [cyclesTotal, setCyclesTotal] = useState(0);
+  const [payoutsPage, setPayoutsPage] = useState(1);
+  const [payoutsTotalPages, setPayoutsTotalPages] = useState(1);
+  const [payoutsTotal, setPayoutsTotal] = useState(0);
 
   useEffect(() => {
-    fetchData();
+    fetchInitial();
   }, []);
 
-  const fetchData = async () => {
+  useEffect(() => { fetchCycles(cyclesPage); }, [cyclesPage]);
+  useEffect(() => { fetchPayouts(payoutsPage); }, [payoutsPage]);
+
+  const fetchInitial = async () => {
     try {
-      const [cyclesRes, payoutsRes] = await Promise.all([
+      const [cyclesRes, payoutsRes, earningsRes, summaryRes] = await Promise.all([
         userAPI.getSalaryCycles(1),
-        userAPI.getPayouts(1)
+        userAPI.getPayouts(1),
+        userAPI.getEarnings().catch(() => null),
+        userAPI.getSalarySummary().catch(() => null)
       ]);
-      const cyclesData = cyclesRes.data.cycles;
-      const payoutsData = payoutsRes.data.payouts;
-
-      setCycles(cyclesData);
-      setPayouts(payoutsData);
-
-      // Calculate stats
-      const activeCycles = cyclesData.filter(c => c.status === 'active');
-      const pausedCycles = cyclesData.filter(c => c.status === 'paused');
-      const totalEarned = payoutsData.filter(p => p.status === 'paid').reduce((sum, p) => sum + parseFloat(p.amount), 0);
-      const pendingAmount = payoutsData.filter(p => p.status === 'pending').reduce((sum, p) => sum + parseFloat(p.amount), 0);
-
-      // Calculate remaining incentive (total expected - total earned - pending)
-      const totalExpected = cyclesData.reduce((sum, c) => {
-        if (c.status === 'active' || c.status === 'paused') {
-          const remainingMonths = c.duration - c.months_paid;
-          return sum + (parseFloat(c.monthly_amount) * remainingMonths);
-        }
-        return sum;
-      }, 0);
-
-      setStats({
-        totalActive: activeCycles.length,
-        totalPaused: pausedCycles.length,
-        totalEarned,
-        pendingAmount,
-        remainingIncentive: totalExpected
-      });
+      setCycles(cyclesRes.data.cycles);
+      setCyclesTotal(cyclesRes.data.total || cyclesRes.data.cycles.length);
+      setCyclesTotalPages(cyclesRes.data.totalPages || 1);
+      setPayouts(payoutsRes.data.payouts);
+      setPayoutsTotal(payoutsRes.data.total || payoutsRes.data.payouts.length);
+      setPayoutsTotalPages(payoutsRes.data.totalPages || 1);
+      if (earningsRes?.data) setEarnings(earningsRes.data);
+      if (summaryRes?.data?.summary) setStats(summaryRes.data.summary);
     } catch (error) {
       toast.error('Failed to load incentive data');
     } finally {
@@ -63,10 +55,30 @@ const Incentive = () => {
     }
   };
 
+  const fetchCycles = async (page) => {
+    try {
+      const res = await userAPI.getSalaryCycles(page);
+      setCycles(res.data.cycles);
+      setCyclesTotal(res.data.total || res.data.cycles.length);
+      setCyclesTotalPages(res.data.totalPages || 1);
+    } catch (e) { /* ignore page fetch errors */ }
+  };
+
+  const fetchPayouts = async (page) => {
+    try {
+      const res = await userAPI.getPayouts(page);
+      setPayouts(res.data.payouts);
+      setPayoutsTotal(res.data.total || res.data.payouts.length);
+      setPayoutsTotalPages(res.data.totalPages || 1);
+    } catch (e) { /* ignore page fetch errors */ }
+  };
+
+  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const payoutDayName = DAY_NAMES[earnings.payout_day ?? 1] || 'Monday';
+
   const getStatusBadge = (status) => {
     const statusMap = {
       'active': 'success',
-      'paused': 'warning',
       'completed': 'info',
       'paid': 'success',
       'pending': 'warning'
@@ -121,8 +133,8 @@ const Incentive = () => {
         <div className="info-banner">
           <div className="info-icon">💡</div>
           <div className="info-content">
-            <strong>How Incentive Works</strong>
-            <p>For each active Refferal , you earn 6%/ month for 6 months  on product sell. Cycles start when your Refferal purchases a product.</p>
+            <strong>How Daily Incentive Works</strong>
+            <p>For each active referral, a fixed daily incentive is credited daily to your Earning Wallet (lifetime total). Your Withdrawal Wallet shows the currently withdrawable balance. Every <strong>{payoutDayName}</strong>, a withdrawal request is auto-generated for your withdrawable balance (min ₹{Number(earnings.min_payout_amount || 0).toLocaleString()}) and paid to your bank by admin.</p>
           </div>
         </div>
 
@@ -134,21 +146,21 @@ const Incentive = () => {
             <div className="stat-value">{stats.totalActive}</div>
             <div className="stat-subtext">Currently earning</div>
           </div>
-          <div className="stat-card warning">
-            <div className="stat-icon">⏸️</div>
-            <div className="stat-label">Paused Cycles</div>
-            <div className="stat-value">{stats.totalPaused}</div>
-            <div className="stat-subtext">Temporarily stopped</div>
-          </div>
           <div className="stat-card">
             <div className="stat-icon">💰</div>
-            <div className="stat-label">Total Earned</div>
-            <div className="stat-value">₹{stats.totalEarned.toLocaleString()}</div>
-            <div className="stat-subtext">Lifetime earnings</div>
+            <div className="stat-label">Earning Wallet</div>
+            <div className="stat-value">₹{Number(earnings.total_earned || 0).toLocaleString()}</div>
+            <div className="stat-subtext">Lifetime incentive earned</div>
           </div>
           <div className="stat-card info">
+            <div className="stat-icon">🏦</div>
+            <div className="stat-label">Withdrawal Wallet</div>
+            <div className="stat-value">₹{Number(earnings.earnings_balance || 0).toLocaleString()}</div>
+            <div className="stat-subtext">Withdrawable on {payoutDayName}</div>
+          </div>
+          <div className="stat-card">
             <div className="stat-icon">⏳</div>
-            <div className="stat-label">Pending Amount</div>
+            <div className="stat-label">Pending Withdrawals</div>
             <div className="stat-value">₹{stats.pendingAmount.toLocaleString()}</div>
             <div className="stat-subtext">Awaiting payout</div>
           </div>
@@ -172,7 +184,7 @@ const Incentive = () => {
             className={`tab ${activeTab === 'payouts' ? 'active' : ''}`}
             onClick={() => setActiveTab('payouts')}
           >
-            📋 Payout History
+            📋 Withdrawal History
           </button>
         </div>
 
@@ -181,8 +193,8 @@ const Incentive = () => {
           <div className="card fade-in">
             <div className="card-header">
               <h3 className="card-title">Incentive Cycles</h3>
-              {cycles.length > 0 && (
-                <span className="badge badge-neutral">{cycles.length} Cycles</span>
+              {cyclesTotal > 0 && (
+                <span className="badge badge-neutral">{cyclesTotal} Cycles</span>
               )}
             </div>
             {cycles.length > 0 ? (
@@ -191,37 +203,42 @@ const Incentive = () => {
                   <thead>
                     <tr>
                       <th>Referral</th>
-                      <th>Start Month</th>
-                      <th>Monthly Amount</th>
+                      <th>Start Date</th>
+                      <th>Daily Amount</th>
                       <th>Progress</th>
                       <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {cycles.map((cycle) => (
-                      <tr key={cycle.id}>
-                        <td className="font-medium">{cycle.referral_name}</td>
-                        <td>{new Date(cycle.start_month).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</td>
-                        <td className="text-primary font-semibold">₹{cycle.monthly_amount}</td>
-                        <td>
-                          <div className="progress-cell">
-                            <div className="progress-bar-mini">
-                              <div
-                                className="progress-fill-mini"
-                                style={{ width: `${(cycle.months_paid / cycle.duration) * 100}%` }}
-                              />
+                    {cycles.map((cycle) => {
+                      const days = cycle.days || cycle.duration || 1;
+                      const daysPaid = cycle.days_paid != null ? cycle.days_paid : (cycle.months_paid || 0);
+                      const startDate = cycle.start_date || cycle.start_month;
+                      const dailyAmount = cycle.daily_amount || cycle.monthly_amount || 0;
+                      return (
+                        <tr key={cycle.id}>
+                          <td className="font-medium">{cycle.referral_name}</td>
+                          <td>{startDate ? new Date(startDate).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</td>
+                          <td className="text-primary font-semibold">₹{parseFloat(dailyAmount).toLocaleString()}</td>
+                          <td>
+                            <div className="progress-cell">
+                              <div className="progress-bar-mini">
+                                <div
+                                  className="progress-fill-mini"
+                                  style={{ width: `${Math.min(100, (daysPaid / days) * 100)}%` }}
+                                />
+                              </div>
+                              <span className="progress-text">{daysPaid}/{days} days</span>
                             </div>
-                            <span className="progress-text">{cycle.months_paid}/{cycle.duration}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`badge badge-${getStatusBadge(cycle.status)}`}>
-                            {cycle.status === 'active' ? '✓ Active' :
-                             cycle.status === 'paused' ? '⏸️ Paused' : '✓ Completed'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td>
+                            <span className={`badge badge-${getStatusBadge(cycle.status)}`}>
+                              {cycle.status === 'active' ? '✓ Active' : '✓ Completed'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -229,12 +246,20 @@ const Incentive = () => {
               <EmptyState
                 icon="💸"
                 title="No incentive cycles yet"
-                description="Start referring friends to create incentive cycles. Each active referral generates ₹100/month for 12 months."
+                description="Start referring friends to create incentive cycles. Each active referral earns a daily incentive credited to your earning wallet."
                 action={{
                   label: 'View Referrals',
                   onClick: () => window.location.href = '/referrals',
                   variant: 'primary'
                 }}
+              />
+            )}
+            {cyclesTotal > 0 && (
+              <Pagination
+                page={cyclesPage}
+                totalPages={cyclesTotalPages}
+                total={cyclesTotal}
+                onChange={setCyclesPage}
               />
             )}
           </div>
@@ -244,9 +269,9 @@ const Incentive = () => {
         {activeTab === 'payouts' && (
           <div className="card fade-in">
             <div className="card-header">
-              <h3 className="card-title">Payout History</h3>
-              {payouts.length > 0 && (
-                <span className="badge badge-neutral">{payouts.length} Payouts</span>
+              <h3 className="card-title">Withdrawal History</h3>
+              {payoutsTotal > 0 && (
+                <span className="badge badge-neutral">{payoutsTotal} Withdrawals</span>
               )}
             </div>
             {payouts.length > 0 ? (
@@ -254,30 +279,36 @@ const Incentive = () => {
                 <table className="table">
                   <thead>
                     <tr>
+                      <th>Type</th>
                       <th>Referral</th>
-                      <th>Period</th>
+                      <th>Date</th>
                       <th>Amount</th>
                       <th>Status</th>
-                      <th>Date & Time</th>
+                      <th>Paid At</th>
                     </tr>
                   </thead>
                   <tbody>
                     {payouts.map((payout) => (
                       <tr key={payout.id}>
-                        <td className="font-medium">{payout.referral_name}</td>
                         <td>
                           <span className="period-badge">
-                            {payout.month}/{payout.year}
+                            {payout.is_withdrawal ? 'Withdrawal' : 'Incentive'}
                           </span>
                         </td>
-                        <td className="text-primary font-semibold">₹{payout.amount}</td>
+                        <td className="font-medium">{payout.referral_name || '-'}</td>
+                        <td>
+                          <span className="period-badge">
+                            {payout.payout_date ? new Date(payout.payout_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : (payout.month ? `${payout.month}/${payout.year}` : '-')}
+                          </span>
+                        </td>
+                        <td className="text-primary font-semibold">₹{parseFloat(payout.amount).toLocaleString()}</td>
                         <td>
                           <span className={`badge badge-${getStatusBadge(payout.status)}`}>
                             {payout.status === 'paid' ? '✓ Paid' : '⏳ Pending'}
                           </span>
                         </td>
                         <td className="text-muted datetime-cell">
-                          {payout.status === 'paid' ? formatDateTime(payout.paid_at) : formatDateTime(payout.created_at)}
+                          {payout.paid_at ? formatDateTime(payout.paid_at) : '-'}
                         </td>
                       </tr>
                     ))}
@@ -287,8 +318,16 @@ const Incentive = () => {
             ) : (
               <EmptyState
                 icon="📋"
-                title="No payout history"
-                description="Your payout history will appear here once incentive cycles are processed."
+                title="No withdrawal history"
+                description="Your withdrawal requests will appear here once your earning wallet reaches the minimum payout amount."
+              />
+            )}
+            {payoutsTotal > 0 && (
+              <Pagination
+                page={payoutsPage}
+                totalPages={payoutsTotalPages}
+                total={payoutsTotal}
+                onChange={setPayoutsPage}
               />
             )}
           </div>
@@ -451,6 +490,12 @@ const Incentive = () => {
 
           .datetime-cell {
             font-size: 0.75rem;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .stats-grid {
+            grid-template-columns: 1fr;
           }
         }
       `}</style>

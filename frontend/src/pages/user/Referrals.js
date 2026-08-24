@@ -5,26 +5,66 @@ import { userAPI } from '../../utils/api';
 import DashboardLayout from '../../components/DashboardLayout';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
+import Pagination from '../../components/Pagination';
 
 const Referrals = () => {
   const [referrals, setReferrals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [modalReferral, setModalReferral] = useState(null);
+  const [purchases, setPurchases] = useState([]);
+  const [purchasesLoading, setPurchasesLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState({ total_referrals: 0, active_referrals: 0, total_direct_business: 0, total_bonus_received: 0 });
   const { user } = useSelector((state) => state.auth);
 
   useEffect(() => {
     fetchReferrals();
-  }, []);
+    fetchSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+
+  const fetchSummary = async () => {
+    try {
+      const response = await userAPI.getReferralSummary();
+      setSummary(response.data.summary);
+    } catch (e) { /* ignore — stats are secondary */ }
+  };
 
   const fetchReferrals = async () => {
     try {
-      const response = await userAPI.getReferrals();
+      setLoading(true);
+      const response = await userAPI.getReferrals(page);
       setReferrals(response.data.referrals);
+      setTotal(response.data.total || 0);
+      setTotalPages(response.data.totalPages || 1);
     } catch (error) {
       toast.error('Failed to load referrals');
     } finally {
       setLoading(false);
     }
+  };
+
+  const openPurchases = async (ref) => {
+    setModalReferral(ref);
+    setPurchases([]);
+    setPurchasesLoading(true);
+    try {
+      const response = await userAPI.getReferralPurchases(ref.id);
+      setPurchases(response.data.purchases);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || 'Failed to load purchases');
+      setModalReferral(null);
+    } finally {
+      setPurchasesLoading(false);
+    }
+  };
+
+  const closePurchases = () => {
+    setModalReferral(null);
+    setPurchases([]);
   };
 
   const referralLink = `${window.location.origin}/register?ref=${user?.referral_code}`;
@@ -56,9 +96,9 @@ const Referrals = () => {
     }
   };
 
-  const activeReferrals = referrals.filter(r => r.has_active_package).length;
-  const totalDirectBusiness = referrals.reduce((sum, r) => sum + (r.direct_business || 0), 0);
-  const totalBonusReceived = referrals.reduce((sum, r) => sum + (r.bonus_received || 0), 0);
+  const activeReferrals = summary.active_referrals;
+  const totalDirectBusiness = summary.total_direct_business;
+  const totalBonusReceived = summary.total_bonus_received;
 
   if (loading) {
     return (
@@ -97,7 +137,7 @@ const Referrals = () => {
             <div className="referral-icon">🔗</div>
             <div className="referral-info">
               <h3>Share Your Referral Link</h3>
-              <p>Earn ₹100/month for 12 months when your referrals purchase a package!</p>
+              <p>Earn daily incentive when your referrals purchase a package!</p>
             </div>
           </div>
           <div className="referral-link-box">
@@ -130,7 +170,7 @@ const Referrals = () => {
           <div className="stat-card">
             <div className="stat-icon">👥</div>
             <div className="stat-label">Total Referrals</div>
-            <div className="stat-value">{referrals.length}</div>
+            <div className="stat-value">{summary.total_referrals}</div>
             <div className="stat-subtext">People you've referred</div>
           </div>
           <div className="stat-card success">
@@ -176,8 +216,8 @@ const Referrals = () => {
             <div className="step">
               <div className="step-number">3</div>
               <div className="step-content">
-                <h4>Earn Monthly Income</h4>
-                <p>Earn Monthly rewards for each active referral</p>
+                <h4>Earn Daily Incentive</h4>
+                <p>Earn daily incentive for each active referral</p>
               </div>
             </div>
           </div>
@@ -187,11 +227,11 @@ const Referrals = () => {
         <div className="card">
           <div className="card-header">
             <h3 className="card-title">Your Referrals</h3>
-            {referrals.length > 0 && (
-              <span className="badge badge-neutral">{referrals.length} Members</span>
+            {summary.total_referrals > 0 && (
+              <span className="badge badge-neutral">{summary.total_referrals} Members</span>
             )}
           </div>
-          {referrals.length > 0 ? (
+          {total > 0 ? (
             <div className="table-container">
               <table className="table">
                 <thead>
@@ -202,6 +242,7 @@ const Referrals = () => {
                     <th>Bonus Received</th>
                     <th>Status</th>
                     <th>Joined</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -235,11 +276,27 @@ const Referrals = () => {
                       <td className="text-muted">
                         {new Date(ref.created_at).toLocaleDateString()}
                       </td>
+                      <td>
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => openPurchases(ref)}
+                        >
+                          📦 View Products
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          ) : null}
+          {total > 0 ? (
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              onChange={setPage}
+            />
           ) : (
             <EmptyState
               icon="👥"
@@ -255,6 +312,48 @@ const Referrals = () => {
           )}
         </div>
       </div>
+
+      {/* Purchases modal */}
+      {modalReferral && (
+        <div className="purchases-modal-overlay" onClick={closePurchases}>
+          <div className="purchases-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="purchases-modal-header">
+              <h3>Products purchased by {modalReferral.name}</h3>
+              <button className="purchases-modal-close" onClick={closePurchases}>×</button>
+            </div>
+            <div className="purchases-modal-body">
+              {purchasesLoading ? (
+                <div className="purchases-loading">Loading…</div>
+              ) : purchases.length > 0 ? (
+                <div className="table-container">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Product Name</th>
+                        <th>Price</th>
+                        <th>Purchase Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {purchases.map((p, idx) => (
+                        <tr key={idx}>
+                          <td className="font-medium">{p.product_name}</td>
+                          <td className="text-primary font-semibold">₹{Number(p.price).toLocaleString()}</td>
+                          <td className="text-muted">
+                            {p.purchase_date ? new Date(p.purchase_date).toLocaleDateString() : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="purchases-empty">No purchases yet.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .referrals-page {
@@ -456,6 +555,12 @@ const Referrals = () => {
         .contact-email {
           font-size: 0.875rem;
           color: var(--gray-700);
+          display: inline-block;
+          max-width: 180px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          vertical-align: bottom;
         }
 
         .contact-mobile {
@@ -472,6 +577,74 @@ const Referrals = () => {
           font-weight: 600;
           color: var(--success-600);
         }
+
+        .purchases-modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 1rem;
+        }
+
+        .purchases-modal {
+          background: white;
+          border-radius: var(--radius-xl);
+          width: 100%;
+          max-width: 560px;
+          max-height: 80vh;
+          display: flex;
+          flex-direction: column;
+          box-shadow: var(--shadow-xl, 0 20px 25px -5px rgba(0,0,0,0.2));
+        }
+
+        .purchases-modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 1.25rem 1.5rem;
+          border-bottom: 1px solid var(--gray-200);
+        }
+
+        .purchases-modal-header h3 {
+          font-size: 1.0625rem;
+          font-weight: 600;
+          color: var(--gray-900);
+          margin: 0;
+        }
+
+        .purchases-modal-close {
+          background: none;
+          border: none;
+          font-size: 1.5rem;
+          color: var(--gray-500);
+          cursor: pointer;
+          line-height: 1;
+          padding: 0 0.25rem;
+        }
+
+        .purchases-modal-close:hover {
+          color: var(--gray-900);
+        }
+
+        .purchases-modal-body {
+          padding: 1.25rem 1.5rem;
+          overflow-y: auto;
+        }
+
+        .purchases-loading,
+        .purchases-empty {
+          text-align: center;
+          padding: 2rem 0;
+          color: var(--gray-500);
+        }
+
+        .font-medium { font-weight: 500; }
+        .font-semibold { font-weight: 600; }
+        .text-primary { color: var(--primary-600); }
+        .text-muted { color: var(--gray-500); }
 
         @media (max-width: 768px) {
           .table-container {

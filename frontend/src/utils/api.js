@@ -58,9 +58,13 @@ export const userAPI = {
   }),
   getKYC: () => api.get('/user/kyc'),
   submitKYC: (data) => api.post('/user/kyc', data),
-  getReferrals: () => api.get('/user/referrals'),
+  getReferrals: (page) => api.get(`/user/referrals${page ? `?page=${page}` : ''}`),
+  getReferralSummary: () => api.get('/user/referrals/summary'),
+  getReferralPurchases: (id) => api.get(`/user/referrals/${id}/purchases`),
   getSalaryCycles: (page) => api.get(`/user/salary-cycles?page=${page}`),
   getPayouts: (page) => api.get(`/user/payouts?page=${page}`),
+  getSalarySummary: () => api.get('/user/salary/summary'),
+  getEarnings: () => api.get('/user/earnings'),
   getWalletTransactions: (page) => api.get(`/user/wallet/transactions?page=${page}`)
 };
 
@@ -70,6 +74,11 @@ export const walletAPI = {
   getTransactions: (page) => api.get(`/wallet/transactions?page=${page}`),
   createDepositOrder: (amount) => api.post('/wallet/deposit/order', { amount }),
   verifyPayment: (data) => api.post('/wallet/deposit/verify', data)
+};
+
+// Contact API (public)
+export const contactAPI = {
+  submit: (data) => api.post('/contact', data)
 };
 
 // Order API
@@ -111,6 +120,7 @@ export const adminAPI = {
   updatePayoutStatus: (id, status) => api.put(`/admin/salary/payouts/${id}`, { status }),
   bulkUpdatePayouts: (ids, status) => api.put('/admin/salary/payouts/bulk', { payout_ids: ids, status }),
   getMonthlySummary: (month, year) => api.get(`/admin/salary/monthly-summary?month=${month}&year=${year}`),
+  getDailySummary: (date) => api.get(`/admin/salary/daily-summary${date ? `?date=${date}` : ''}`),
   runClosing: () => api.post('/admin/salary/run-closing'),
   getSalesReport: (start, end) => api.get(`/admin/reports/sales?start_date=${start}&end_date=${end}`),
   getSalaryReport: (year) => api.get(`/admin/reports/salary?year=${year}`),

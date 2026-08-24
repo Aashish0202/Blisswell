@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS products (
   price DECIMAL(12,2) NOT NULL,
   image VARCHAR(500),
   images TEXT,
+  youtube_link VARCHAR(500) DEFAULT NULL,
   salary_amount DECIMAL(12,2) DEFAULT 100.00,
   salary_duration INT DEFAULT 12,
   is_active BOOLEAN DEFAULT TRUE,

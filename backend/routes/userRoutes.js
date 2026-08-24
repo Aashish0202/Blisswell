@@ -21,10 +21,14 @@ router.post('/kyc', userController.submitKYC);
 
 // Referrals
 router.get('/referrals', userController.getReferrals);
+router.get('/referrals/summary', userController.getReferralSummary);
+router.get('/referrals/:id/purchases', userController.getReferralPurchases);
 
 // Salary
+router.get('/salary/summary', userController.getSalarySummary);
 router.get('/salary-cycles', userController.getSalaryCycles);
 router.get('/payouts', userController.getPayouts);
+router.get('/earnings', userController.getEarnings);
 
 // Wallet
 router.get('/wallet/transactions', userController.getWalletTransactions);

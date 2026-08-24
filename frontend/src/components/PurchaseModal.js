@@ -8,7 +8,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState('confirm'); // 'confirm' | 'processing' | 'success' | 'failed' | 'cancelled'
   const [razorpayLoaded, setRazorpayLoaded] = useState(false);
-  const [currentOrderId, setCurrentOrderId] = useState(null);
+  const [, setCurrentOrderId] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
 
   console.log('PurchaseModal render:', { isOpen, product: product?.name, razorpayLoaded });
@@ -217,13 +217,13 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
                 </div>
               </div>
 
-              {product.salary_amount && product.salary_duration && (
+              {(product.daily_amount || product.salary_amount) && (product.days || product.salary_duration) && (
                 <div className="earning-info">
                   <div className="earning-badge">
                     <span className="earning-icon">💰</span>
                     <div className="earning-text">
                       <span className="earning-label">Your Referral Earnings</span>
-                      <span className="earning-amount">₹{formatPrice(product.salary_amount)}/month for {product.salary_duration} months</span>
+                      <span className="earning-amount">₹{formatPrice(product.daily_amount || product.salary_amount)}/day for {product.days || product.salary_duration} days</span>
                     </div>
                   </div>
                 </div>

@@ -7,8 +7,51 @@ import ConfirmationDialog from '../../components/ConfirmationDialog';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
 import DataTable from '../../components/DataTable';
+import ExportMenu from '../../components/ExportMenu';
 
 const API_URL = process.env.REACT_APP_API_URL;
+
+// Extract YouTube video ID from various URL formats
+const getYouTubeId = (url) => {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtube\.com\/watch\?.+&v=)([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+};
+
+// YouTube Video Modal Component
+const YouTubeModal = ({ youtubeLink, onClose }) => {
+  const videoId = getYouTubeId(youtubeLink);
+  if (!videoId) return null;
+
+  return (
+    <div className="youtube-modal-overlay" onClick={onClose}>
+      <div className="youtube-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="youtube-modal-header">
+          <h3>Product Video</h3>
+          <button className="youtube-modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="youtube-modal-body">
+          <iframe
+            src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+            title="Product Video"
+            frameBorder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          ></iframe>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // Image Lightbox Component
 const ImageLightbox = ({ images, currentIndex, onClose, onNext, onPrev, getImageUrl }) => {
@@ -98,14 +141,16 @@ const AdminProducts = () => {
   const [uploadingIndex, setUploadingIndex] = useState(null);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'table'
   const [lightbox, setLightbox] = useState({ isOpen: false, images: [], currentIndex: 0 });
+  const [youtubeModal, setYoutubeModal] = useState({ isOpen: false, youtubeLink: '' });
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     price: '',
-    salary_amount: '100',
-    salary_duration: '12',
+    daily_amount: '50',
+    days: '15',
     image: '',
     images: [], // New field for multiple images
+    youtube_link: '',
     is_active: true
   });
 
@@ -210,7 +255,7 @@ const AdminProducts = () => {
       }
       setShowModal(false);
       setEditProduct(null);
-      setFormData({ name: '', description: '', price: '', salary_amount: '100', salary_duration: '12', image: '', images: [], is_active: true });
+      setFormData({ name: '', description: '', price: '', daily_amount: '50', days: '15', image: '', images: [], youtube_link: '', is_active: true });
       fetchProducts();
     } catch (error) {
       toast.error('Failed to save product');
@@ -242,10 +287,11 @@ const AdminProducts = () => {
       name: product.name,
       description: product.description || '',
       price: product.price,
-      salary_amount: product.salary_amount || '100',
-      salary_duration: product.salary_duration || '12',
+      daily_amount: product.daily_amount || product.salary_amount || '50',
+      days: product.days || product.salary_duration || '15',
       image: product.image || '',
       images: productImages,
+      youtube_link: product.youtube_link || '',
       is_active: product.is_active
     });
     setShowModal(true);
@@ -265,7 +311,7 @@ const AdminProducts = () => {
 
   const openCreateModal = () => {
     setEditProduct(null);
-    setFormData({ name: '', description: '', price: '', salary_amount: '100', salary_duration: '12', image: '', images: [], is_active: true });
+    setFormData({ name: '', description: '', price: '', daily_amount: '50', days: '15', image: '', images: [], is_active: true });
     setShowModal(true);
   };
 
@@ -343,15 +389,15 @@ const AdminProducts = () => {
     {
       key: 'price',
       label: 'Price',
-      render: (value) => <span className="price-cell">₹{parseFloat(value).toLocaleString()}</span>
+      render: (value) => <span className="price-cell">₹{(parseFloat(value) || 0).toLocaleString()}</span>
     },
     {
-      key: 'salary_amount',
-      label: 'Monthly Incentive',
+      key: 'daily_amount',
+      label: 'Daily Incentive',
       render: (value, row) => (
         <div className="salary-cell">
-          <span className="salary-amount">₹{parseFloat(value || 100).toLocaleString()}</span>
-          <span className="salary-duration">/ {row.salary_duration || 12} mo</span>
+          <span className="salary-amount">₹{parseFloat(value || row.salary_amount || 50).toLocaleString()}</span>
+          <span className="salary-duration">/ {row.days || row.salary_duration || 15} days</span>
         </div>
       )
     },
@@ -359,9 +405,24 @@ const AdminProducts = () => {
       key: 'total_payout',
       label: 'Total Payout',
       render: (value, row) => {
-        const total = (parseFloat(row.salary_amount || 100) * parseInt(row.salary_duration || 12));
+        const total = (parseFloat(row.daily_amount || row.salary_amount || 50) * parseInt(row.days || row.salary_duration || 15));
         return <span className="payout-cell">₹{total.toLocaleString()}</span>;
       }
+    },
+    {
+      key: 'youtube_link',
+      label: 'Video',
+      render: (value) => value ? (
+        <button
+          className="video-link-btn"
+          onClick={() => setYoutubeModal({ isOpen: true, youtubeLink: value })}
+          title="Watch product video"
+        >
+          ▶ Video
+        </button>
+      ) : (
+        <span className="no-video">—</span>
+      )
     },
     {
       key: 'is_active',
@@ -420,6 +481,23 @@ const AdminProducts = () => {
             <button className="btn btn-primary" onClick={openCreateModal}>
               + Add Product
             </button>
+            <ExportMenu
+              fetchAll={async () => {
+                if (!products || products.length === 0) {
+                  toast.info('No products to export');
+                }
+                return products || [];
+              }}
+              columns={[
+                { key: 'name', label: 'Name' },
+                { key: 'price', label: 'Price' },
+                { key: 'days', label: 'Days' },
+                { key: 'daily_amount', label: 'Daily Amount' },
+                { key: 'is_active', label: 'Active' }
+              ]}
+              filename="products-export"
+              title="Blisswell Products"
+            />
           </div>
         </div>
 
@@ -473,25 +551,35 @@ const AdminProducts = () => {
 
                     <div className="product-price-row">
                       <div className="price-info">
-                        <span className="product-price">₹{parseFloat(product.price).toLocaleString()}</span>
+                        <span className="product-price">₹{(parseFloat(product.price) || 0).toLocaleString()}</span>
                         <span className="price-label">Price</span>
                       </div>
                     </div>
 
                     <div className="salary-info-card">
                       <div className="salary-item">
-                        <span className="salary-label">Monthly Incentive</span>
-                        <span className="salary-value">₹{parseFloat(product.salary_amount || 100).toLocaleString()}</span>
+                        <span className="salary-label">Daily Incentive</span>
+                        <span className="salary-value">₹{parseFloat(product.daily_amount || product.salary_amount || 50).toLocaleString()}</span>
                       </div>
                       <div className="salary-item">
-                        <span className="salary-label">Duration</span>
-                        <span className="salary-value">{product.salary_duration || 12} months</span>
+                        <span className="salary-label">Days</span>
+                        <span className="salary-value">{product.days || product.salary_duration || 15} days</span>
                       </div>
                       <div className="salary-item highlight">
                         <span className="salary-label">Total Payout</span>
-                        <span className="salary-value">₹{(parseFloat(product.salary_amount || 100) * parseInt(product.salary_duration || 12)).toLocaleString()}</span>
+                        <span className="salary-value">₹{(parseFloat(product.daily_amount || product.salary_amount || 50) * parseInt(product.days || product.salary_duration || 15)).toLocaleString()}</span>
                       </div>
                     </div>
+
+                    {product.youtube_link && (
+                      <button
+                        className="watch-video-btn"
+                        onClick={() => setYoutubeModal({ isOpen: true, youtubeLink: product.youtube_link })}
+                      >
+                        <span className="watch-video-icon">▶</span>
+                        Watch Video
+                      </button>
+                    )}
 
                     <div className="product-actions">
                       <button
@@ -603,6 +691,17 @@ const AdminProducts = () => {
               placeholder="Product description"
             />
           </div>
+          <div className="form-group">
+            <label className="form-label">YouTube Video Link</label>
+            <input
+              type="url"
+              className="form-input"
+              value={formData.youtube_link}
+              onChange={(e) => setFormData({ ...formData, youtube_link: e.target.value })}
+              placeholder="https://www.youtube.com/watch?v=..."
+            />
+            <span className="form-hint">Add a YouTube video link to showcase this product (optional)</span>
+          </div>
           <div className="form-row">
             <div className="form-group">
               <label className="form-label">Price (₹) *</label>
@@ -621,37 +720,37 @@ const AdminProducts = () => {
           {/* Incentive Configuration Section */}
           <div className="salary-config-section">
             <h4 className="section-title">💰 Incentive Configuration</h4>
-            <p className="section-desc">Configure the incentive benefits for referrers when this product is purchased</p>
+            <p className="section-desc">Configure the daily incentive benefits for referrers when this product is purchased</p>
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Monthly Incentive Amount (₹)</label>
+                <label className="form-label">Daily Incentive Amount (₹)</label>
                 <input
                   type="number"
                   className="form-input"
-                  value={formData.salary_amount}
-                  onChange={(e) => setFormData({ ...formData, salary_amount: e.target.value })}
+                  value={formData.daily_amount}
+                  onChange={(e) => setFormData({ ...formData, daily_amount: e.target.value })}
                   min="0"
-                  placeholder="100"
+                  placeholder="50"
                 />
-                <span className="form-hint">Amount referrer earns per month per referral</span>
+                <span className="form-hint">Amount credited daily to referrer's earning wallet</span>
               </div>
               <div className="form-group">
-                <label className="form-label">Duration (Months)</label>
+                <label className="form-label">Days</label>
                 <input
                   type="number"
                   className="form-input"
-                  value={formData.salary_duration}
-                  onChange={(e) => setFormData({ ...formData, salary_duration: e.target.value })}
+                  value={formData.days}
+                  onChange={(e) => setFormData({ ...formData, days: e.target.value })}
                   min="1"
-                  max="24"
-                  placeholder="12"
+                  max="365"
+                  placeholder="15"
                 />
-                <span className="form-hint">Number of months incentive is paid</span>
+                <span className="form-hint">Number of days incentive is paid</span>
               </div>
             </div>
             <div className="salary-preview">
               <span className="preview-label">Total Payout per Referral:</span>
-              <span className="preview-value">₹{((parseFloat(formData.salary_amount) || 100) * (parseInt(formData.salary_duration) || 12)).toLocaleString()}</span>
+              <span className="preview-value">₹{((parseFloat(formData.daily_amount) || 50) * (parseInt(formData.days) || 15)).toLocaleString()}</span>
             </div>
           </div>
 
@@ -910,6 +1009,143 @@ const AdminProducts = () => {
         .product-actions {
           display: flex;
           gap: 0.5rem;
+        }
+
+        /* Watch Video Button */
+        .watch-video-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          width: 100%;
+          padding: 0.5rem 0.875rem;
+          margin-bottom: 0.75rem;
+          background: white;
+          border: 1px solid #dc2626;
+          border-radius: var(--radius-lg);
+          color: #dc2626;
+          font-size: 0.8125rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .watch-video-btn:hover {
+          background: #dc2626;
+          color: white;
+        }
+
+        .watch-video-icon {
+          width: 24px;
+          height: 24px;
+          background: #dc2626;
+          color: white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.625rem;
+          flex-shrink: 0;
+          transition: background 0.2s;
+        }
+
+        .watch-video-btn:hover .watch-video-icon {
+          background: white;
+          color: #dc2626;
+        }
+
+        /* Table Video Link */
+        .video-link-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.25rem;
+          padding: 0.25rem 0.625rem;
+          background: white;
+          border: 1px solid #dc2626;
+          border-radius: var(--radius-md);
+          color: #dc2626;
+          font-size: 0.75rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          white-space: nowrap;
+        }
+
+        .video-link-btn:hover {
+          background: #dc2626;
+          color: white;
+        }
+
+        .no-video {
+          color: var(--gray-300);
+          font-size: 0.875rem;
+        }
+
+        /* YouTube Video Modal */
+        .youtube-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.85);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2000;
+          padding: 1rem;
+        }
+
+        .youtube-modal {
+          background: white;
+          border-radius: var(--radius-xl);
+          max-width: 800px;
+          width: 100%;
+          overflow: hidden;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .youtube-modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 1rem 1.25rem;
+          border-bottom: 1px solid var(--gray-100);
+        }
+
+        .youtube-modal-header h3 {
+          margin: 0;
+          font-size: 1rem;
+          font-weight: 600;
+          color: var(--gray-900);
+        }
+
+        .youtube-modal-close {
+          background: none;
+          border: none;
+          font-size: 1.5rem;
+          color: var(--gray-500);
+          cursor: pointer;
+          padding: 0;
+          line-height: 1;
+        }
+
+        .youtube-modal-close:hover {
+          color: var(--gray-900);
+        }
+
+        .youtube-modal-body {
+          position: relative;
+          padding-top: 56.25%; /* 16:9 aspect ratio */
+          background: #000;
+        }
+
+        .youtube-modal-body iframe {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          border: none;
         }
 
         /* Table Styles */
@@ -1409,6 +1645,14 @@ const AdminProducts = () => {
           }
         }
       `}</style>
+
+      {/* YouTube Video Modal */}
+      {youtubeModal.isOpen && (
+        <YouTubeModal
+          youtubeLink={youtubeModal.youtubeLink}
+          onClose={() => setYoutubeModal({ isOpen: false, youtubeLink: '' })}
+        />
+      )}
     </AdminLayout>
   );
 };

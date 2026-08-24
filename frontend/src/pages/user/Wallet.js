@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
 import { walletAPI, orderAPI } from '../../utils/api';
 import DashboardLayout from '../../components/DashboardLayout';
+import Pagination from '../../components/Pagination';
 
 const Wallet = () => {
   const [balance, setBalance] = useState(0);
@@ -11,13 +12,20 @@ const Wallet = () => {
   const [razorpayLoaded, setRazorpayLoaded] = useState(false);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [packageAmounts, setPackageAmounts] = useState([]);
+  const [txPage, setTxPage] = useState(1);
+  const [txTotalPages, setTxTotalPages] = useState(1);
+  const [txTotal, setTxTotal] = useState(0);
+  const [txFilter, setTxFilter] = useState('');
 
   useEffect(() => {
     loadRazorpay();
     fetchBalance();
-    fetchTransactions();
     fetchPackageAmounts();
   }, []);
+
+  useEffect(() => {
+    fetchTransactions(txPage);
+  }, [txPage]);
 
   const fetchPackageAmounts = async () => {
     try {
@@ -51,14 +59,21 @@ const Wallet = () => {
     }
   };
 
-  const fetchTransactions = async () => {
+  const fetchTransactions = async (page) => {
     try {
-      const response = await walletAPI.getTransactions(1);
+      const response = await walletAPI.getTransactions(page);
       setTransactions(response.data.transactions);
+      setTxTotal(response.data.total || 0);
+      setTxTotalPages(response.data.totalPages || 1);
     } catch (error) {
       console.error('Failed to fetch transactions');
     }
   };
+
+  // Client-side type filter on the current page
+  const displayedTransactions = txFilter
+    ? transactions.filter(t => t.type === txFilter)
+    : transactions;
 
   const handleDeposit = async () => {
     const amount = parseFloat(depositAmount);
@@ -183,16 +198,23 @@ const Wallet = () => {
           <div className="card-header">
             <h3 className="card-title">Transaction History</h3>
             <div className="card-filters">
-              <select className="form-select form-input" style={{ width: 'auto', minWidth: '150px' }}>
+              <select
+                className="form-select form-input"
+                style={{ width: 'auto', minWidth: '150px' }}
+                value={txFilter}
+                onChange={(e) => setTxFilter(e.target.value)}
+              >
                 <option value="">All Types</option>
                 <option value="deposit">Deposits</option>
                 <option value="purchase">Purchases</option>
                 <option value="refund">Refunds</option>
+                <option value="incentive">Incentives</option>
+                <option value="withdrawal">Withdrawals</option>
               </select>
             </div>
           </div>
 
-          {transactions.length > 0 ? (
+          {displayedTransactions.length > 0 ? (
             <div className="table-container">
               <table className="table">
                 <thead>
@@ -205,7 +227,7 @@ const Wallet = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.map((tx) => (
+                  {displayedTransactions.map((tx) => (
                     <tr key={tx.id}>
                       <td>
                         <div className="tx-date">
@@ -219,6 +241,8 @@ const Wallet = () => {
                           {tx.type === 'purchase' && '🛍️ Purchase'}
                           {tx.type === 'refund' && '↩️ Refund'}
                           {tx.type === 'bonus' && '🎁 Bonus'}
+                          {tx.type === 'incentive' && '🌱 Incentive'}
+                          {tx.type === 'withdrawal' && '🏧 Withdrawal'}
                         </span>
                       </td>
                       <td>
@@ -240,12 +264,20 @@ const Wallet = () => {
           ) : (
             <div className="empty-state">
               <div className="empty-icon">💳</div>
-              <h4>No transactions yet</h4>
-              <p>Add funds to your wallet to get started</p>
+              <h4>{txFilter ? 'No matching transactions' : 'No transactions yet'}</h4>
+              <p>{txFilter ? 'Try a different filter.' : 'Add funds to your wallet to get started'}</p>
               {/* <button className="btn btn-primary" onClick={() => setShowDepositModal(true)}>
                 Add Funds
               </button> */}
             </div>
+          )}
+          {txTotal > 0 && (
+            <Pagination
+              page={txPage}
+              totalPages={txTotalPages}
+              total={txTotal}
+              onChange={setTxPage}
+            />
           )}
         </div>
       </div>
@@ -482,6 +514,10 @@ const Wallet = () => {
         .tx-description {
           color: var(--gray-600);
           font-size: 0.875rem;
+          max-width: 220px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .empty-state {

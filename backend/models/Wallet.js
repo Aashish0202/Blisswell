@@ -59,6 +59,39 @@ const Wallet = {
       [userId, amount]
     );
     return rows.length > 0;
+  },
+
+  // ---- Earning wallet (separate from spendable balance) ----
+  // Daily incentive credits accumulate here. Withdrawals debit it.
+
+  // Add incentive earnings (daily credit)
+  async addEarnings(userId, amount, connection = pool) {
+    const conn = connection;
+    const [result] = await conn.execute(
+      'UPDATE wallets SET earnings_balance = earnings_balance + ?, updated_at = NOW() WHERE user_id = ?',
+      [amount, userId]
+    );
+    return result.affectedRows > 0;
+  },
+
+  // Debit earnings (when a withdrawal payout is generated)
+  async debitEarnings(userId, amount, connection = pool) {
+    const conn = connection;
+    const [result] = await conn.execute(
+      'UPDATE wallets SET earnings_balance = earnings_balance - ?, updated_at = NOW() WHERE user_id = ? AND earnings_balance >= ?',
+      [amount, userId, amount]
+    );
+    return result.affectedRows > 0;
+  },
+
+  // Get earnings balance
+  async getEarnings(userId, connection = pool) {
+    const conn = connection;
+    const [rows] = await conn.execute(
+      'SELECT earnings_balance FROM wallets WHERE user_id = ?',
+      [userId]
+    );
+    return rows[0]?.earnings_balance || 0;
   }
 };
 

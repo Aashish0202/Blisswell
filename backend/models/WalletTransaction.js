@@ -27,6 +27,15 @@ const WalletTransaction = {
     return rows;
   },
 
+  // Count transactions by user (for pagination)
+  async countByUserId(userId) {
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) as count FROM wallet_transactions WHERE user_id = ?`,
+      [userId]
+    );
+    return rows[0].count;
+  },
+
   // Get transaction by ID
   async getById(id) {
     const [rows] = await pool.execute(

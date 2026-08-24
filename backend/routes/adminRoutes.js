@@ -34,6 +34,7 @@ router.put('/kyc/:id', adminController.updateKYC);
 // Order Management
 router.get('/orders', adminController.getOrders);
 router.put('/orders/:id/status', adminController.updateOrderStatus);
+router.post('/orders/expire', adminController.expireStuckOrders);
 
 // Product Management
 router.get('/products', adminController.getProducts);
@@ -47,10 +48,10 @@ router.get('/salary/cycles', adminController.getSalaryCycles);
 router.get('/salary/payouts', adminController.getPayouts);
 router.get('/salary/payouts-with-kyc', adminController.getPayoutsWithKYC);
 router.get('/salary/payouts/export-excel', adminController.exportPayoutsExcel);
-router.put('/salary/payouts/:id', adminController.updatePayoutStatus);
 router.put('/salary/payouts/bulk', adminController.bulkUpdatePayouts);
-router.get('/salary/monthly-summary', salaryController.getMonthlyClosingSummary);
-router.post('/salary/run-closing', salaryController.triggerMonthlyClosing);
+router.put('/salary/payouts/:id', adminController.updatePayoutStatus);
+router.get('/salary/daily-summary', salaryController.getDailyClosingSummary);
+router.post('/salary/run-closing', salaryController.triggerDailyClosing);
 
 // Reports
 router.get('/reports/sales', adminController.getSalesReport);

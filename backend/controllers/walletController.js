@@ -125,11 +125,14 @@ exports.getTransactions = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
 
     const transactions = await WalletTransaction.getByUserId(req.user.id, page, limit);
+    const total = await WalletTransaction.countByUserId(req.user.id);
 
     res.json({
       transactions,
       page,
-      limit
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit))
     });
   } catch (error) {
     console.error('Get transactions error:', error);

@@ -1,12 +1,143 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 import { userAPI, orderAPI } from '../../utils/api';
 import DashboardLayout from '../../components/DashboardLayout';
 import SmartActionCard, { getSmartCards } from '../../components/SmartActionCard';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
+import PurchaseModal from '../../components/PurchaseModal';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
+// Extract YouTube video ID from various URL formats
+const getYouTubeId = (url) => {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtube\.com\/watch\?.+&v=)([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+};
+
+// YouTube Video Modal Component
+const YouTubeModal = ({ youtubeLink, onClose }) => {
+  const videoId = getYouTubeId(youtubeLink);
+  if (!videoId) return null;
+
+  return (
+    <div className="youtube-modal-overlay" onClick={onClose}>
+      <div className="youtube-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="youtube-modal-header">
+          <h3>Product Video</h3>
+          <button className="youtube-modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="youtube-modal-body">
+          <iframe
+            src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+            title="Product Video"
+            frameBorder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          ></iframe>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Image Lightbox Component
+const ImageLightbox = ({ images, currentIndex, onClose, onNext, onPrev, getImageUrl }) => {
+  if (!images || images.length === 0) return null;
+
+  return (
+    <div className="lightbox-overlay" onClick={onClose}>
+      <div className="lightbox-content" onClick={(e) => e.stopPropagation()}>
+        <button className="lightbox-close" onClick={onClose}>&times;</button>
+
+        {images.length > 1 && (
+          <button className="lightbox-nav lightbox-prev" onClick={(e) => { e.stopPropagation(); onPrev(); }}>
+            &#8249;
+          </button>
+        )}
+
+        <img src={getImageUrl(images[currentIndex])} alt="Product" className="lightbox-image" />
+
+        {images.length > 1 && (
+          <button className="lightbox-nav lightbox-next" onClick={(e) => { e.stopPropagation(); onNext(); }}>
+            &#8250;
+          </button>
+        )}
+
+        {images.length > 1 && (
+          <div className="lightbox-dots">
+            {images.map((_, idx) => (
+              <span
+                key={idx}
+                className={`lightbox-dot ${idx === currentIndex ? 'active' : ''}`}
+                onClick={(e) => { e.stopPropagation(); }}
+              ></span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Image Slider Component for products with multiple images
+const ImageSlider = ({ images, getImageUrl, alt, onImageClick }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (images && images.length > 1) {
+      intervalRef.current = setInterval(() => {
+        setCurrentIndex((prev) => (prev + 1) % images.length);
+      }, 4000);
+    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [images]);
+
+  if (!images || images.length === 0) {
+    return (
+      <div className="product-placeholder">
+        <span className="product-emoji">🛏️</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="image-slider" onClick={onImageClick} style={{ cursor: 'pointer' }}>
+      <img
+        src={getImageUrl(images[currentIndex])}
+        alt={alt}
+        onError={(e) => {
+          e.target.onerror = null;
+          e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="180" viewBox="0 0 200 180"><rect fill="%23f3f4f6" width="200" height="180"/><text x="100" y="90" text-anchor="middle" font-size="60">🛏️</text></svg>';
+        }}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'opacity 0.3s ease' }}
+      />
+      {images.length > 1 && (
+        <div className="slider-dots">
+          {images.map((_, idx) => (
+            <span key={idx} className={`dot ${idx === currentIndex ? 'active' : ''}`}></span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Dashboard = () => {
   const [dashboard, setDashboard] = useState(null);
@@ -14,6 +145,16 @@ const Dashboard = () => {
   const [teamTree, setTeamTree] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+  const [expandedDescriptions, setExpandedDescriptions] = useState({});
+  const [lightbox, setLightbox] = useState({ isOpen: false, images: [], currentIndex: 0 });
+  const [youtubeModal, setYoutubeModal] = useState({ isOpen: false, youtubeLink: '' });
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [profile, setProfile] = useState(null);
+
+  // Logged-in user from Redux (populated at login) — used as a fallback so the
+  // profile card always shows dynamic data even before/without the dashboard fetch.
+  const authUser = useSelector((state) => state.auth.user);
 
   const getImageUrl = (image) => {
     if (!image) return null;
@@ -28,6 +169,16 @@ const Dashboard = () => {
       const dashboardRes = await userAPI.getDashboard();
       console.log(dashboardRes)
       setDashboard(dashboardRes.data);
+
+      try {
+        // Fetch the full profile (same call the Profile page uses) so the
+        // top profile card always has the real name/email/profile photo,
+        // even if the dashboard endpoint doesn't return them.
+        const profileRes = await userAPI.getProfile();
+        setProfile(profileRes.data?.user || null);
+      } catch (profileErr) {
+        console.error('Profile fetch error:', profileErr);
+      }
 
       try {
         const productsRes = await orderAPI.getProducts();
@@ -64,6 +215,28 @@ const Dashboard = () => {
     toast.success('Referral link copied!');
   };
 
+  const toggleDescription = (productId) => {
+    setExpandedDescriptions(prev => ({
+      ...prev,
+      [productId]: !prev[productId]
+    }));
+  };
+
+  const openPurchaseDialog = (product) => {
+    setSelectedProduct(product);
+    setShowPurchaseModal(true);
+  };
+
+  const closePurchaseModal = () => {
+    setShowPurchaseModal(false);
+    setSelectedProduct(null);
+  };
+
+  const handlePurchaseSuccess = () => {
+    fetchData();
+    closePurchaseModal();
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -81,10 +254,19 @@ const Dashboard = () => {
   }
 
   const smartCards = getSmartCards(dashboard?.user, dashboard?.wallet, dashboard?.referrals);
-  const user = dashboard?.user || {};
+  const user = { ...authUser, ...(dashboard?.user || {}), ...(profile || {}) };
   const wallet = dashboard?.wallet || {};
   const salary = dashboard?.salary || {};
   const referrals = dashboard?.referrals || {};
+
+  // Resolve the user's uploaded profile photo (if any) to a full URL
+  const getProfileImageUrl = () => {
+    const img = user?.profile_image;
+    if (!img) return null;
+    if (img.startsWith('http')) return img;
+    const baseUrl = API_URL.replace('/api', '');
+    return `${baseUrl}${img}`;
+  };
 
   return (
     <DashboardLayout>
@@ -99,7 +281,13 @@ const Dashboard = () => {
           <div className="profile-hero-content">
             <div className="profile-avatar-wrapper">
               <div className="profile-avatar">
-                {user.name?.charAt(0).toUpperCase() || 'U'}
+                {getProfileImageUrl() ? (
+                  <img src={getProfileImageUrl()} alt={user.name || 'User'} className="profile-avatar-img" />
+                ) : (
+                  (user.name?.trim()?.charAt(0)?.toUpperCase()) ||
+                  (user.email?.trim()?.charAt(0)?.toUpperCase()) ||
+                  'U'
+                )}
               </div>
               <span className={`status-dot ${user.has_active_package ? 'active' : 'inactive'}`}></span>
             </div>
@@ -168,7 +356,7 @@ const Dashboard = () => {
             <div className="stat-card-icon">💸</div>
             <div className="stat-card-content">
               <span className="stat-card-value">₹{parseFloat(salary.pending_amount || 0).toLocaleString()}</span>
-              <span className="stat-card-label">Pending Payout</span>
+              <span className="stat-card-label">Pending Withdrawal</span>
             </div>
             <div className="stat-card-arrow">→</div>
           </Link>
@@ -257,7 +445,8 @@ const Dashboard = () => {
                 </div>
                 <div className="featured-products-grid">
                   {products.slice(0, 2).map((product, index) => {
-                    const incentiveAmount = parseFloat(product.salary_amount || 100);
+                    const incentiveAmount = parseFloat(product.daily_amount || product.salary_amount || 50);
+                    const incentiveDays = product.days || product.salary_duration || 15;
                     return (
                       <div key={product.id} className="featured-product-tile animate-in" style={{ animationDelay: `${index * 0.1}s` }}>
                         <div className="featured-product-image">
@@ -270,7 +459,7 @@ const Dashboard = () => {
                         <div className="featured-product-content">
                           <h4>{product.name}</h4>
                           <div className="featured-incentive">
-                            <span className="incentive-badge">💰 ₹{incentiveAmount.toLocaleString()}/mo</span>
+                            <span className="incentive-badge">💰 ₹{incentiveAmount.toLocaleString()}/day × {incentiveDays}</span>
                           </div>
                           <div className="featured-footer">
                             <span className="featured-price">₹{parseFloat(product.price).toLocaleString()}</span>
@@ -291,16 +480,18 @@ const Dashboard = () => {
               </div>
               <div className="income-cards-grid">
                 <div className="income-mini-card">
-                  <span className="income-mini-label">This Month</span>
-                  <span className="income-mini-value">₹{parseFloat(salary.this_month || 0).toLocaleString()}</span>
+                  <span className="income-mini-label">Earning Wallet</span>
+                  <span className="income-mini-value">₹{parseFloat(salary.total_earned || 0).toLocaleString()}</span>
+                  <span className="income-mini-sub">Lifetime earned</span>
                 </div>
                 <div className="income-mini-card">
-                  <span className="income-mini-label">Last Month</span>
-                  <span className="income-mini-value">₹{parseFloat(salary.last_month || 0).toLocaleString()}</span>
+                  <span className="income-mini-label">Withdrawal Wallet</span>
+                  <span className="income-mini-value">₹{parseFloat(salary.earnings_balance || 0).toLocaleString()}</span>
+                  <span className="income-mini-sub">Withdrawable balance</span>
                 </div>
                 <div className="income-mini-card">
-                  <span className="income-mini-label">Total Paid</span>
-                  <span className="income-mini-value">₹{parseFloat(salary.total_paid || 0).toLocaleString()}</span>
+                  <span className="income-mini-label">Pending Withdrawals</span>
+                  <span className="income-mini-value">₹{parseFloat(salary.pending_amount || 0).toLocaleString()}</span>
                 </div>
                 <div className="income-mini-card highlight">
                   <span className="income-mini-label">Active Cycles</span>
@@ -343,52 +534,105 @@ const Dashboard = () => {
           <div className="tab-content animate-fade-in">
             <div className="shop-hero">
               <h2>🛍️ Premium Products</h2>
-              <p>Purchase products and earn monthly incentive for each active referral</p>
+              <p>Purchase products and earn daily incentive for each active referral</p>
             </div>
-            <div className="products-masonry">
+            <div className="products-grid-dashboard">
               {products.length > 0 ? products.map((product, index) => {
-                const incentiveAmount = parseFloat(product.salary_amount || 100);
-                const incentiveDuration = parseInt(product.salary_duration || 12);
-                const totalPayout = incentiveAmount * incentiveDuration;
+                const dailyAmount = parseFloat(product.daily_amount || product.salary_amount || 50);
+                const incentiveDays = parseInt(product.days || product.salary_duration || 15);
+                const totalPayout = dailyAmount * incentiveDays;
+
+                // Get images array or fallback to single image
+                const productImages = product.images && product.images.length > 0
+                  ? product.images
+                  : product.image ? [product.image] : [];
+
+                const openLightbox = () => {
+                  if (productImages.length > 0) {
+                    setLightbox({ isOpen: true, images: productImages, currentIndex: 0 });
+                  }
+                };
 
                 return (
-                  <div key={product.id} className="product-card-premium animate-in" style={{ animationDelay: `${index * 0.1}s` }}>
-                    <div className="product-image-wrapper">
-                      {product.image ? (
-                        <img src={getImageUrl(product.image)} alt={product.name} onError={(e) => { e.target.onerror = null; e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect fill="%23f3f4f6" width="200" height="200"/><text x="50%" y="50%" text-anchor="middle" dy=".3em" font-size="80">🛏️</text></svg>'; }} />
-                      ) : (
-                        <div className="placeholder-image"><span>🛏️</span></div>
+                  <div
+                    key={product.id}
+                    className="product-card-enhanced hover-lift animate-card"
+                    style={{ animationDelay: `${index * 0.1}s` }}
+                  >
+                    <div className="product-image-wrapper" onClick={openLightbox} style={{ cursor: productImages.length > 0 ? 'pointer' : 'default' }}>
+                      <ImageSlider
+                        images={productImages}
+                        getImageUrl={getImageUrl}
+                        alt={product.name}
+                        onImageClick={openLightbox}
+                      />
+                      {!product.is_active && (
+                        <div className="product-unavailable">
+                          <span>Currently Unavailable</span>
+                        </div>
                       )}
                     </div>
-                    <div className="product-content-premium">
-                      <h3 className="product-title">{product.name}</h3>
-                      <p className="product-desc">{product.description || 'Premium quality product'}</p>
-
-                      <div className="incentive-highlight">
-                        <div className="salary-row">
-                          <span className="salary-icon">💰</span>
-                          <span className="salary-text">Earn <strong>₹{incentiveAmount.toLocaleString()}/month</strong> for {incentiveDuration} months</span>
-                        </div>
-                        <div className="salary-total">
-                          <span>Total earning per referral:</span>
-                          <span className="total-amount">₹{totalPayout.toLocaleString()}</span>
-                        </div>
+                    <div className="product-content">
+                      <h4 className="product-title">{product.name}</h4>
+                      <div className={`product-desc-wrapper ${expandedDescriptions[product.id] ? 'expanded' : ''}`}>
+                        <p className="product-desc">
+                          {product.description || 'Premium quality product'}
+                        </p>
+                        {product.description && product.description.length > 80 && (
+                          <button
+                            className="see-more-btn"
+                            onClick={() => toggleDescription(product.id)}
+                          >
+                            {expandedDescriptions[product.id] ? 'See Less' : 'See More'}
+                          </button>
+                        )}
                       </div>
 
-                      <div className="product-features-mini">
-                        <span className="feature-tag">✓ Premium Quality</span>
-                        <span className="feature-tag">✓ Free Shipping</span>
+                      {/* Salary Benefits Card */}
+                      <div className="salary-benefits-card">
+                        <div className="benefit-header">
+                          <span className="benefit-icon">💰</span>
+                          <span className="benefit-title">Daily Referral Incentive</span>
+                        </div>
+                        <div className="benefit-details">
+                          <div className="benefit-row">
+                            <span className="benefit-label">Daily Incentive</span>
+                            <span className="benefit-value">₹{dailyAmount.toLocaleString()}/day</span>
+                          </div>
+                          <div className="benefit-row">
+                            <span className="benefit-label">Duration</span>
+                            <span className="benefit-value">{incentiveDays} days</span>
+                          </div>
+                          <div className="benefit-row highlight">
+                            <span className="benefit-label">Total Earning</span>
+                            <span className="benefit-value total">₹{totalPayout.toLocaleString()}</span>
+                          </div>
+                        </div>
+                        <p className="benefit-note">Per active referral who purchases this product</p>
                       </div>
 
-                      <div className="product-action-row">
-                        <div className="price-block">
-                          <span className="price-label">Price</span>
-                          <span className="price-value">₹{parseFloat(product.price).toLocaleString()}</span>
+                      {product.youtube_link && (
+                        <button
+                          className="watch-video-btn"
+                          onClick={() => setYoutubeModal({ isOpen: true, youtubeLink: product.youtube_link })}
+                        >
+                          <span className="watch-video-icon">▶</span>
+                          Watch Video
+                        </button>
+                      )}
+
+                      <div className="product-price-row">
+                        <div className="price-section">
+                          <span className="product-price">₹{parseFloat(product.price).toLocaleString()}</span>
+                          <span className="price-label">Product Price</span>
                         </div>
-                        <Link to="/orders" className="btn-purchase">
-                          <span>Buy Now</span>
-                          <span>→</span>
-                        </Link>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => openPurchaseDialog(product)}
+                          disabled={!product.is_active}
+                        >
+                          {product.is_active ? 'Buy Now' : 'Unavailable'}
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -413,7 +657,7 @@ const Dashboard = () => {
                 <div className="referral-icon">🔗</div>
                 <div className="referral-text">
                   <h3>Share & Earn</h3>
-                  <p>Earn monthly incentive for every active team member who purchases</p>
+                  <p>Earn daily incentive for every active team member who purchases</p>
                 </div>
               </div>
               <div className="referral-link-box">
@@ -467,7 +711,11 @@ const Dashboard = () => {
                     </div>
                   ))}
                 </div>
-              ) : (
+              ) : null}
+              {teamTree.length > 0 && (referrals.total || 0) > teamTree.length && (
+                <Link to="/referrals" className="team-view-all">View all {referrals.total} referrals →</Link>
+              )}
+              {teamTree.length === 0 && (
                 <div className="empty-state-large">
                   <span className="empty-icon">👥</span>
                   <h3>Build Your Team</h3>
@@ -562,6 +810,14 @@ const Dashboard = () => {
           color: #ffffff;
           box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
           border: 3px solid rgba(255, 255, 255, 0.2);
+          overflow: hidden;
+        }
+
+        .profile-avatar-img {
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          object-fit: cover;
         }
 
         .status-dot {
@@ -1091,6 +1347,13 @@ const Dashboard = () => {
           color: var(--gray-900);
         }
 
+        .income-mini-sub {
+          display: block;
+          font-size: 0.625rem;
+          color: var(--gray-400);
+          margin-top: 0.125rem;
+        }
+
         /* Orders List Compact */
         .orders-list-compact {
           display: flex;
@@ -1176,166 +1439,486 @@ const Dashboard = () => {
           margin: 0;
         }
 
-        .products-masonry {
+        /* Card Animation */
+        @keyframes cardEntrance {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        .animate-card {
+          animation: cardEntrance 0.4s ease-out forwards;
+          opacity: 0;
+        }
+
+        .hover-lift:hover {
+          transform: translateY(-4px);
+          box-shadow: var(--shadow-lg);
+        }
+
+        .products-grid-dashboard {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
           gap: 1.5rem;
         }
 
-        .product-card-premium {
+        .product-card-enhanced {
+          position: relative;
           background: white;
           border-radius: var(--radius-xl);
           overflow: hidden;
           box-shadow: var(--shadow-card);
-          border: 1px solid var(--gray-100);
-          transition: all 0.3s ease;
+          transition: all 0.3s;
         }
 
-        .product-card-premium:hover {
-          transform: translateY(-8px);
-          box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.15);
+        /* Thick gradient border (always on) — matches the website product cards */
+        .product-card-enhanced::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          padding: 2px;
+          background: linear-gradient(135deg, #2563eb, #059669);
+          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+                  mask-composite: exclude;
+          pointer-events: none;
+          z-index: 3;
+          transition: padding 0.2s ease;
+        }
+
+        .product-card-enhanced:hover {
+          transform: translateY(-4px);
+          box-shadow: var(--shadow-lg);
+        }
+
+        .product-card-enhanced:hover::before {
+          padding: 2.75px;
         }
 
         .product-image-wrapper {
-          height: 200px;
+          position: relative;
+          height: 160px;
           background: linear-gradient(135deg, var(--primary-50), var(--accent-50));
-          display: flex;
-          align-items: center;
-          justify-content: center;
           overflow: hidden;
         }
 
-        .product-image-wrapper img {
+        .product-placeholder {
           width: 100%;
           height: 100%;
-          object-fit: cover;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
-        .placeholder-image {
+        .product-emoji {
           font-size: 4rem;
         }
 
-        .product-content-premium {
-          padding: 1.5rem;
+        .image-slider {
+          position: relative;
+          width: 100%;
+          height: 100%;
         }
 
-        .product-title {
+        .slider-dots {
+          position: absolute;
+          bottom: 8px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 6px;
+          z-index: 10;
+        }
+
+        .slider-dots .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.5);
+          transition: all 0.3s ease;
+        }
+
+        .slider-dots .dot.active {
+          background: white;
+          transform: scale(1.2);
+        }
+
+        /* Lightbox Styles */
+        .lightbox-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.9);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2000;
+          padding: 2rem;
+        }
+
+        .lightbox-content {
+          position: relative;
+          max-width: 90vw;
+          max-height: 90vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .lightbox-image {
+          max-width: 100%;
+          max-height: 85vh;
+          object-fit: contain;
+          border-radius: 8px;
+        }
+
+        .lightbox-close {
+          position: absolute;
+          top: -40px;
+          right: 0;
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          font-size: 1.5rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: background 0.2s;
+        }
+
+        .lightbox-close:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .lightbox-nav {
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          font-size: 1.5rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: background 0.2s;
+        }
+
+        .lightbox-nav:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .lightbox-prev {
+          left: -60px;
+        }
+
+        .lightbox-next {
+          right: -60px;
+        }
+
+        .lightbox-dots {
+          position: absolute;
+          bottom: -30px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 8px;
+        }
+
+        .lightbox-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.4);
+          transition: all 0.3s ease;
+        }
+
+        .lightbox-dot.active {
+          background: white;
+          transform: scale(1.2);
+        }
+
+        .product-unavailable {
+          position: absolute;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 600;
+          font-size: 0.875rem;
+        }
+
+        .product-content {
+          padding: 1.25rem;
+        }
+
+        .product-card-enhanced .product-title {
           font-size: 1.125rem;
           font-weight: 600;
           color: var(--gray-900);
-          margin: 0 0 0.5rem 0;
+          margin-bottom: 0.5rem;
         }
 
-        .product-desc {
-          font-size: 0.875rem;
-          color: var(--gray-500);
-          margin: 0 0 1rem 0;
-          line-height: 1.5;
+        .product-desc-wrapper {
+          margin-bottom: 1rem;
+        }
+
+        .product-desc-wrapper:not(.expanded) .product-desc {
           display: -webkit-box;
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
           overflow: hidden;
         }
 
-        .incentive-highlight {
+        .product-desc-wrapper.expanded .product-desc {
+          display: block;
+        }
+
+        .product-desc {
+          font-size: 0.8125rem;
+          color: var(--gray-500);
+          line-height: 1.5;
+          margin: 0;
+        }
+
+        .see-more-btn {
+          background: none;
+          border: none;
+          color: var(--primary-600);
+          font-size: 0.75rem;
+          font-weight: 500;
+          cursor: pointer;
+          padding: 0.25rem 0 0 0;
+          margin-top: 0.25rem;
+          text-decoration: none;
+          display: inline-block;
+        }
+
+        .see-more-btn:hover {
+          color: var(--primary-700);
+          text-decoration: underline;
+        }
+
+        /* Salary Benefits Card */
+        .salary-benefits-card {
           background: linear-gradient(135deg, var(--accent-50), var(--primary-50));
-          border: 1px solid var(--accent-200);
+          border: 1px solid var(--accent-100);
           border-radius: var(--radius-lg);
           padding: 1rem;
           margin-bottom: 1rem;
         }
 
-        .salary-row {
+        .benefit-header {
           display: flex;
           align-items: center;
           gap: 0.5rem;
-          margin-bottom: 0.5rem;
+          margin-bottom: 0.75rem;
+          padding-bottom: 0.5rem;
+          border-bottom: 1px solid var(--accent-100);
         }
 
-        .salary-icon { font-size: 1rem; }
-
-        .salary-text {
-          font-size: 0.875rem;
-          color: var(--gray-700);
-        }
-
-        .salary-text strong {
-          color: var(--accent-600);
-        }
-
-        .salary-total {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding-top: 0.5rem;
-          border-top: 1px dashed var(--accent-200);
-          font-size: 0.8125rem;
-          color: var(--gray-600);
-        }
-
-        .total-amount {
+        .benefit-icon {
           font-size: 1rem;
-          font-weight: 700;
-          color: var(--accent-600);
         }
 
-        .product-features-mini {
+        .benefit-title {
+          font-size: 0.8125rem;
+          font-weight: 600;
+          color: var(--accent-700);
+        }
+
+        .benefit-details {
           display: flex;
-          flex-wrap: wrap;
+          flex-direction: column;
           gap: 0.5rem;
-          margin-bottom: 1rem;
         }
 
-        .feature-tag {
-          padding: 0.25rem 0.625rem;
-          background: var(--gray-100);
-          border-radius: var(--radius-full);
-          font-size: 0.6875rem;
-          font-weight: 500;
+        .benefit-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .benefit-row.highlight {
+          background: var(--accent-100);
+          margin: 0.25rem -0.5rem;
+          padding: 0.375rem 0.5rem;
+          border-radius: var(--radius-sm);
+        }
+
+        .benefit-label {
+          font-size: 0.75rem;
           color: var(--gray-600);
         }
 
-        .product-action-row {
+        .benefit-value {
+          font-size: 0.875rem;
+          font-weight: 600;
+          color: var(--gray-900);
+        }
+
+        .benefit-value.total {
+          color: var(--accent-600);
+          font-size: 1rem;
+        }
+
+        .benefit-note {
+          font-size: 0.6875rem;
+          color: var(--gray-500);
+          margin: 0.5rem 0 0 0;
+          font-style: italic;
+        }
+
+        /* Watch Video Button */
+        .watch-video-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          width: 100%;
+          padding: 0.625rem 1rem;
+          margin-bottom: 1rem;
+          background: white;
+          border: 1px solid #dc2626;
+          border-radius: var(--radius-lg);
+          color: #dc2626;
+          font-size: 0.8125rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .watch-video-btn:hover {
+          background: #dc2626;
+          color: white;
+        }
+
+        .watch-video-icon {
+          width: 28px;
+          height: 28px;
+          background: #dc2626;
+          color: white;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.75rem;
+          flex-shrink: 0;
+          transition: background 0.2s;
+        }
+
+        .watch-video-btn:hover .watch-video-icon {
+          background: white;
+          color: #dc2626;
+        }
+
+        /* YouTube Video Modal */
+        .youtube-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.85);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2000;
+          padding: 1rem;
+        }
+
+        .youtube-modal {
+          background: white;
+          border-radius: var(--radius-xl);
+          max-width: 800px;
+          width: 100%;
+          overflow: hidden;
+          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .youtube-modal-header {
           display: flex;
           justify-content: space-between;
-          align-items: flex-end;
+          align-items: center;
+          padding: 1rem 1.25rem;
+          border-bottom: 1px solid var(--gray-100);
+        }
+
+        .youtube-modal-header h3 {
+          margin: 0;
+          font-size: 1rem;
+          font-weight: 600;
+          color: var(--gray-900);
+        }
+
+        .youtube-modal-close {
+          background: none;
+          border: none;
+          font-size: 1.5rem;
+          color: var(--gray-500);
+          cursor: pointer;
+          padding: 0;
+          line-height: 1;
+        }
+
+        .youtube-modal-close:hover {
+          color: var(--gray-900);
+        }
+
+        .youtube-modal-body {
+          position: relative;
+          padding-top: 56.25%; /* 16:9 aspect ratio */
+          background: #000;
+        }
+
+        .youtube-modal-body iframe {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          border: none;
+        }
+
+        .product-price-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
           padding-top: 1rem;
           border-top: 1px solid var(--gray-100);
         }
 
-        .price-block {
+        .product-price-row .price-section {
           display: flex;
           flex-direction: column;
         }
 
-        .price-label {
-          font-size: 0.6875rem;
-          color: var(--gray-500);
-        }
-
-        .price-value {
-          font-size: 1.5rem;
+        .product-price {
+          font-size: 1.375rem;
           font-weight: 700;
           color: var(--primary-600);
         }
 
-        .btn-purchase {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          padding: 0.75rem 1.25rem;
-          background: linear-gradient(135deg, var(--primary-600), var(--primary-700));
-          color: white;
-          border-radius: var(--radius-lg);
-          font-size: 0.875rem;
-          font-weight: 600;
-          text-decoration: none;
-          transition: all 0.2s;
-        }
-
-        .btn-purchase:hover {
-          transform: scale(1.05);
-          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        .product-price-row .price-label {
+          font-size: 0.6875rem;
+          color: var(--gray-500);
         }
 
         /* Team Section */
@@ -1438,6 +2021,22 @@ const Dashboard = () => {
           display: flex;
           flex-direction: column;
           gap: 0.5rem;
+        }
+
+        .team-view-all {
+          display: block;
+          text-align: center;
+          margin-top: 0.75rem;
+          padding: 0.625rem;
+          font-size: 0.875rem;
+          font-weight: 600;
+          color: var(--primary-600, #4f46e5);
+          text-decoration: none;
+          border-radius: var(--radius-lg, 0.5rem);
+          transition: background 0.2s;
+        }
+        .team-view-all:hover {
+          background: var(--gray-50, #f9fafb);
         }
 
         .team-member-row {
@@ -1625,7 +2224,7 @@ const Dashboard = () => {
             padding: 1rem;
           }
 
-          .products-masonry {
+          .products-grid-dashboard {
             grid-template-columns: 1fr;
             gap: 1rem;
           }
@@ -1685,19 +2284,53 @@ const Dashboard = () => {
             border-radius: var(--radius-lg);
           }
 
-          .product-content-premium {
+          .product-content {
             padding: 1rem;
           }
 
-          .incentive-highlight {
+          .salary-benefits-card {
             padding: 0.875rem;
           }
 
-          .price-value {
+          .product-price {
             font-size: 1.25rem;
           }
         }
       `}</style>
+
+      {/* Purchase Modal */}
+      <PurchaseModal
+        isOpen={showPurchaseModal}
+        onClose={closePurchaseModal}
+        product={selectedProduct}
+        onSuccess={handlePurchaseSuccess}
+      />
+
+      {/* Image Lightbox */}
+      {lightbox.isOpen && (
+        <ImageLightbox
+          images={lightbox.images}
+          currentIndex={lightbox.currentIndex}
+          onClose={() => setLightbox({ isOpen: false, images: [], currentIndex: 0 })}
+          onNext={() => setLightbox(prev => ({
+            ...prev,
+            currentIndex: (prev.currentIndex + 1) % prev.images.length
+          }))}
+          onPrev={() => setLightbox(prev => ({
+            ...prev,
+            currentIndex: (prev.currentIndex - 1 + prev.images.length) % prev.images.length
+          }))}
+          getImageUrl={getImageUrl}
+        />
+      )}
+
+      {/* YouTube Video Modal */}
+      {youtubeModal.isOpen && (
+        <YouTubeModal
+          youtubeLink={youtubeModal.youtubeLink}
+          onClose={() => setYoutubeModal({ isOpen: false, youtubeLink: '' })}
+        />
+      )}
     </DashboardLayout>
   );
 };

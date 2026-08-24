@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSiteSettings } from '../components/SiteSettingsProvider';
+import { contactAPI } from '../utils/api';
 
 const Contact = () => {
   const [isVisible, setIsVisible] = useState(false);
@@ -11,8 +12,9 @@ const Contact = () => {
     message: ''
   });
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
   const {
-    siteName,
     contact_phone,
     contact_email,
     contact_address,
@@ -36,12 +38,20 @@ const Contact = () => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // Handle form submission
-    setSubmitted(true);
-    setTimeout(() => setSubmitted(false), 3000);
-    setFormData({ name: '', email: '', phone: '', subject: '', message: '' });
+    setSubmitting(true);
+    setError('');
+    try {
+      await contactAPI.submit(formData);
+      setSubmitted(true);
+      setFormData({ name: '', email: '', phone: '', subject: '', message: '' });
+      setTimeout(() => setSubmitted(false), 4000);
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Could not send your message right now. Please try again later.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -170,6 +180,12 @@ const Contact = () => {
                   </div>
                 )}
 
+                {error && (
+                  <div className="error-message" style={{ background: '#fee2e2', color: '#991b1b', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', fontSize: '0.875rem' }}>
+                    {error}
+                  </div>
+                )}
+
                 <div className="form-row">
                   <div className="form-group">
                     <label htmlFor="name">Full Name</label>
@@ -240,8 +256,8 @@ const Contact = () => {
                   ></textarea>
                 </div>
 
-                <button type="submit" className="submit-btn">
-                  <span>Send Message</span>
+                <button type="submit" className="submit-btn" disabled={submitting}>
+                  <span>{submitting ? 'Sending…' : 'Send Message'}</span>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
                   </svg>
@@ -263,7 +279,7 @@ const Contact = () => {
               </svg>
             </div>
             <h3>Visit Our Store</h3>
-            <p>BUSINESS PLAZA, A WING, SHOP NO -409, AADGOAN NAKA PANCHAWATI NASHIK</p>
+            <p>{contact_address || 'BUSINESS PLAZA, A WING, SHOP NO -409, AADGOAN NAKA PANCHAWATI NASHIK'}</p>
             <a href="https://maps.google.com" target="_blank" rel="noopener noreferrer" className="btn-directions">
               <span>Get Directions</span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

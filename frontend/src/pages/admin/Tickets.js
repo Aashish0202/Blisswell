@@ -3,10 +3,11 @@ import { toast } from 'react-toastify';
 import { ticketAPI } from '../../utils/api';
 import AdminLayout from '../../components/AdminLayout';
 import DataTable from '../../components/DataTable';
+import ExportMenu from '../../components/ExportMenu';
 
 const AdminTickets = () => {
   const [tickets, setTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalTickets, setTotalTickets] = useState(0);
   const [filters, setFilters] = useState({ status: '', priority: '' });
@@ -17,7 +18,7 @@ const AdminTickets = () => {
   useEffect(() => {
     fetchTickets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, filters.status]);
+  }, [page, filters.status, filters.priority]);
 
   const fetchTickets = async () => {
     setLoading(true);
@@ -180,6 +181,32 @@ const AdminTickets = () => {
           <div>
             <h1 className="page-title">Support Tickets</h1>
             <p className="page-subtitle">Manage customer support tickets</p>
+          </div>
+          <div className="page-header-actions">
+            <ExportMenu
+              fetchAll={async () => {
+                const all = [];
+                let p = 1, totalPages = 1;
+                while (p <= totalPages) {
+                  const res = await ticketAPI.getAllTickets(p, filters);
+                  all.push(...(res.data.tickets || []));
+                  totalPages = res.data.pages || Math.ceil((res.data.total || all.length) / 20);
+                  p++;
+                }
+                if (all.length === 0) toast.info('No tickets to export');
+                return all;
+              }}
+              columns={[
+                { key: 'ticket_number', label: 'Ticket ID' },
+                { key: 'subject', label: 'Subject' },
+                { key: 'user_name', label: 'User' },
+                { key: 'priority', label: 'Priority' },
+                { key: 'status', label: 'Status' },
+                { key: 'created_at', label: 'Created' }
+              ]}
+              filename="tickets-export"
+              title="Blisswell Support Tickets"
+            />
           </div>
         </div>
 
