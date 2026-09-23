@@ -547,7 +547,7 @@ const Home = () => {
                 </svg>
               </div>
               <h3>Earn Daily</h3>
-              <p>Refer friends & earn daily incentive</p>
+              <p>Refer friends & earn Team Income</p>
             </div>
           </div>
         </div>
@@ -652,10 +652,10 @@ const Home = () => {
           --color-text-primary: #0a0a0a;
           --color-text-secondary: #525252;
           --color-text-muted: #737373;
-          --color-accent: #2563eb;
-          --color-accent-light: #dbeafe;
-          --color-success: #059669;
-          --color-success-light: #d1fae5;
+          --color-accent: #073C39;
+          --color-accent-light: #E3EDE4;
+          --color-success: #5D8172;
+          --color-success-light: #E3EDE4;
           --color-border: #e5e5e5;
           --color-border-light: #f5f5f5;
           --font-serif: 'Playfair Display', 'Times New Roman', Georgia, serif;
@@ -716,7 +716,7 @@ const Home = () => {
         .hero-glow-1 {
           width: 600px;
           height: 600px;
-          background: radial-gradient(circle, rgba(37, 99, 235, 0.08) 0%, transparent 70%);
+          background: radial-gradient(circle, rgba(7, 60, 57, 0.08) 0%, transparent 70%);
           top: -200px;
           right: -100px;
         }
@@ -767,7 +767,7 @@ const Home = () => {
           align-items: center;
           gap: 0.5rem;
           padding: 0.5rem 1rem;
-          background: rgba(37, 99, 235, 0.08);
+          background: rgba(7, 60, 57, 0.08);
           border-radius: 100px;
           margin-bottom: 1.5rem;
           font-size: 0.8125rem;
@@ -808,7 +808,7 @@ const Home = () => {
           display: block;
           font-size: clamp(3rem, 6vw, 4.5rem);
           font-weight: 500;
-          background: linear-gradient(135deg, #2563eb 0%, #059669 100%);
+          background: linear-gradient(135deg, #073C39 0%, #5D8172 100%);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
@@ -1017,7 +1017,7 @@ const Home = () => {
         .image-glow {
           position: absolute;
           inset: -20px;
-          background: radial-gradient(circle at center, rgba(37, 99, 235, 0.1) 0%, transparent 70%);
+          background: radial-gradient(circle at center, rgba(7, 60, 57, 0.1) 0%, transparent 70%);
           pointer-events: none;
         }
 
@@ -1147,7 +1147,7 @@ const Home = () => {
         .section-label {
           display: inline-block;
           padding: 0.5rem 1rem;
-          background: linear-gradient(135deg, var(--color-accent-light), #eff6ff);
+          background: linear-gradient(135deg, var(--color-accent-light), #F1F5F1);
           color: var(--color-accent);
           font-size: 0.75rem;
           font-weight: 600;
@@ -1212,7 +1212,7 @@ const Home = () => {
 
         .product-card:hover {
           transform: translateY(-10px);
-          box-shadow: 0 24px 48px rgba(37, 99, 235, 0.14), 0 8px 20px rgba(0, 0, 0, 0.08);
+          box-shadow: 0 24px 48px rgba(7, 60, 57, 0.14), 0 8px 20px rgba(0, 0, 0, 0.08);
         }
 
         .product-card:hover::before {
@@ -1313,7 +1313,7 @@ const Home = () => {
         }
 
         .badge.bestseller {
-          background: linear-gradient(135deg, #2563eb, #1d4ed8);
+          background: linear-gradient(135deg, #073C39, #0B4541);
           color: #fff;
         }
 
@@ -1429,13 +1429,13 @@ const Home = () => {
           border: none;
           border-radius: var(--radius-md);
           cursor: pointer;
-          box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+          box-shadow: 0 4px 14px rgba(7, 60, 57, 0.28);
           transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
         }
 
         .btn-add:hover {
           transform: translateY(-2px);
-          box-shadow: 0 10px 24px rgba(37, 99, 235, 0.38);
+          box-shadow: 0 10px 24px rgba(7, 60, 57, 0.38);
           filter: brightness(1.05);
         }
 
@@ -1769,7 +1769,7 @@ const Home = () => {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, var(--color-accent-light), #dbeafe);
+          background: linear-gradient(135deg, var(--color-accent-light), #E3EDE4);
           border-radius: 50%;
           font-weight: 600;
           color: var(--color-accent);

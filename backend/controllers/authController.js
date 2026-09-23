@@ -16,7 +16,7 @@ exports.register = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { name, email, mobile, state, address, password, pan_number, ref, terms_accepted } = req.body;
+    const { name, email, mobile, state, address, pincode, password, pan_number, ref, terms_accepted } = req.body;
 
     // Check if terms are accepted
     if (!terms_accepted) {
@@ -26,6 +26,11 @@ exports.register = async (req, res) => {
     // Check if address is provided
     if (!address || address.trim() === '') {
       return res.status(400).json({ message: 'Address is required' });
+    }
+
+    // Check if pincode is provided and valid (Indian 6-digit pincode, needed for delivery)
+    if (!pincode || !/^[1-9]\d{5}$/.test(pincode.trim())) {
+      return res.status(400).json({ message: 'Valid 6-digit pincode is required' });
     }
 
     // Check if email already exists
@@ -67,6 +72,7 @@ exports.register = async (req, res) => {
     const userId = await User.create({
       state,
       address,
+      pincode: pincode.trim(),
       name,
       email,
       mobile,

@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
-const salaryController = require('../controllers/salaryController');
 const Gallery = require('../models/Gallery');
 const { verifyToken, isAdmin } = require('../middleware/auth');
 const { uploadProductImage, uploadLogoImage, uploadGalleryImage } = require('../middleware/upload');
@@ -43,34 +42,27 @@ router.put('/products/:id', adminController.updateProduct);
 router.delete('/products/:id', adminController.deleteProduct);
 router.post('/products/upload-image', uploadProductImage.single('image'), adminController.uploadProductImage);
 
-// Salary Management
-router.get('/salary/cycles', adminController.getSalaryCycles);
-router.get('/salary/payouts', adminController.getPayouts);
-router.get('/salary/payouts-with-kyc', adminController.getPayoutsWithKYC);
-router.get('/salary/payouts/export-excel', adminController.exportPayoutsExcel);
-router.put('/salary/payouts/bulk', adminController.bulkUpdatePayouts);
-router.put('/salary/payouts/:id', adminController.updatePayoutStatus);
-router.get('/salary/daily-summary', salaryController.getDailyClosingSummary);
-router.post('/salary/run-closing', salaryController.triggerDailyClosing);
+// Auto-repurchase engine (admin trigger / testing)
+router.post('/auto-repurchase/run', adminController.runAutoRepurchase);
 
-// Reports
+// Reports (new income model)
 router.get('/reports/sales', adminController.getSalesReport);
-router.get('/reports/salary', adminController.getSalaryReport);
-router.get('/reports/liability', adminController.getLiabilityReport);
+router.get('/reports/team-income', adminController.getTeamIncomeReport);
+router.get('/reports/withdrawals', adminController.getWithdrawalReport);
+router.get('/reports/user-earnings', adminController.getUserEarningsReport);
 router.get('/reports/referrals', adminController.getReferralReport);
 router.get('/reports/wallet', adminController.getWalletReport);
 router.get('/reports/user-financial', adminController.getUserFinancialReport);
-router.get('/reports/business-bonus', adminController.getBusinessBonusReport);
+router.get('/reports/ranks', adminController.getRankReport);
 
-// Business Bonus Management
-router.get('/bonus/payouts', adminController.getBonusPayouts);
-router.get('/bonus/payouts/export-excel', adminController.exportBonusPayoutsExcel);
-router.put('/bonus/payouts/:id', adminController.updateBonusPayoutStatus);
-router.post('/bonus/recalculate', adminController.recalculateBonuses);
+// User detailed report (active users list + single-user complete history)
+router.get('/reports/user-list', adminController.getUserReportList);
+router.get('/reports/user-detail/:userId', adminController.getUserDetailReport);
 
-// Settings
+// Settings (income settings + audit log)
 router.get('/settings', adminController.getSettings);
 router.put('/settings', adminController.updateSettings);
+router.get('/settings/audit', adminController.getSettingsAuditLogs);
 
 // Site Settings (logo, name, etc.)
 router.get('/site-settings', adminController.getSiteSettings);

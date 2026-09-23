@@ -3,7 +3,8 @@ const razorpay = require('../config/razorpay');
 const pool = require('../config/db');
 const Wallet = require('../models/Wallet');
 const WalletTransaction = require('../models/WalletTransaction');
-const Settings = require('../models/Settings');
+const User = require('../models/User');
+const Product = require('../models/Product');
 
 // Create Razorpay order for wallet deposit
 exports.createDepositOrder = async (req, res) => {
@@ -22,9 +23,6 @@ exports.createDepositOrder = async (req, res) => {
       return res.status(400).json({ message: 'Minimum deposit amount is ₹100' });
     }
 
-    // Get package settings
-    const settings = await Settings.getPackageSettings();
-
     // Create Razorpay order
     const order = await razorpay.orders.create({
       amount: amount * 100, // Convert to paise
@@ -40,8 +38,7 @@ exports.createDepositOrder = async (req, res) => {
       order_id: order.id,
       amount: order.amount,
       currency: order.currency,
-      key_id: process.env.RAZORPAY_KEY_ID,
-      package_price: settings.package_price
+      key_id: process.env.RAZORPAY_KEY_ID
     });
   } catch (error) {
     console.error('Create deposit order error:', error);
@@ -104,13 +101,38 @@ exports.verifyPayment = async (req, res) => {
   }
 };
 
-// Get wallet balance
+// Get wallet balance (includes the repurchase wallet + next upgrade info)
 exports.getBalance = async (req, res) => {
   try {
     const wallet = await Wallet.getByUserId(req.user.id);
 
+    // Next upgrade info (needs user's current product + active rank products)
+    let next_upgrade = null;
+    try {
+      const user = await User.findById(req.user.id);
+      if (user && user.has_active_package && user.current_product_id) {
+        const next = await Product.getNextHigherProduct(user.current_product_id);
+        if (next) {
+          const repurchase = parseFloat(wallet?.repurchase_balance) || 0;
+          const price = parseFloat(next.price);
+          next_upgrade = {
+            product_id: next.id,
+            rank_name: next.rank_name,
+            price,
+            shortfall: Math.max(0, price - repurchase),
+            progress: Math.min(100, (repurchase / price) * 100)
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Next upgrade lookup error:', e);
+    }
+
     res.json({
-      balance: wallet?.balance || 0
+      balance: wallet?.balance || 0,
+      earnings_balance: wallet?.earnings_balance || 0,
+      repurchase_balance: parseFloat(wallet?.repurchase_balance) || 0,
+      next_upgrade
     });
   } catch (error) {
     console.error('Get balance error:', error);
@@ -118,27 +140,31 @@ exports.getBalance = async (req, res) => {
   }
 };
 
-// Get transaction history
+  // Get transaction history
 exports.getTransactions = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    try {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
 
-    const transactions = await WalletTransaction.getByUserId(req.user.id, page, limit);
-    const total = await WalletTransaction.countByUserId(req.user.id);
+      const transactions = await WalletTransaction.getByUserId(req.user.id, page, limit);
+      const total = await WalletTransaction.countByUserId(req.user.id);
+      const stats = await WalletTransaction.getLifetimeStats(req.user.id);
 
-    res.json({
-      transactions,
-      page,
-      limit,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / limit))
-    });
-  } catch (error) {
-    console.error('Get transactions error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
+      res.json({
+        transactions,
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+        // Lifetime totals across ALL history (server-completed only), for the
+        // wallet page stat cards.
+        stats
+      });
+    } catch (error) {
+      console.error('Get transactions error:', error);
+      res.status(500).json({ message: 'Server error' });
+    }
+  };
 
 // Razorpay webhook handler
 exports.webhook = async (req, res) => {

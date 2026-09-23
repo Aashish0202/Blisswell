@@ -294,7 +294,7 @@ const Gallery = () => {
         .glow-1 {
           width: 400px;
           height: 400px;
-          background: rgba(37, 99, 235, 0.08);
+          background: rgba(7, 60, 57, 0.08);
           top: -50px;
           right: -50px;
         }
@@ -326,18 +326,18 @@ const Gallery = () => {
           align-items: center;
           gap: 0.5rem;
           padding: 0.5rem 1rem;
-          background: rgba(37, 99, 235, 0.08);
+          background: rgba(7, 60, 57, 0.08);
           border-radius: 100px;
           margin-bottom: 1.5rem;
           font-size: 0.8125rem;
           font-weight: 500;
-          color: #2563eb;
+          color: #073C39;
         }
 
         .eyebrow-dot {
           width: 6px;
           height: 6px;
-          background: #2563eb;
+          background: #073C39;
           border-radius: 50%;
           animation: pulse 2s infinite;
         }
@@ -364,7 +364,7 @@ const Gallery = () => {
           display: block;
           font-size: clamp(2.5rem, 5vw, 3.5rem);
           font-weight: 500;
-          background: linear-gradient(135deg, #2563eb, #059669);
+          background: linear-gradient(135deg, #073C39, #5D8172);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
@@ -460,7 +460,7 @@ const Gallery = () => {
           align-items: center;
           justify-content: center;
           font-size: 3rem;
-          color: #2563eb;
+          color: #073C39;
         }
 
         .gallery-item.large .image-placeholder {
@@ -695,9 +695,9 @@ const Gallery = () => {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, #dbeafe, #eff6ff);
+          background: linear-gradient(135deg, #E3EDE4, #F1F5F1);
           border-radius: 16px;
-          color: #2563eb;
+          color: #073C39;
           margin: 0 auto 1rem;
         }
 

@@ -103,30 +103,6 @@ const getEmailTemplate = (type, data) => {
         </div>
       `
     },
-    payout: {
-      subject: `Salary Payout Received - ${data.siteName || 'Blisswell'}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <div style="background: linear-gradient(135deg, #10B981 0%, #059669 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
-            <h1 style="color: white; margin: 0;">💰 Payout Received!</h1>
-          </div>
-          <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px;">
-            <p style="font-size: 16px; color: #374151;">Hello ${data.name},</p>
-            <p style="font-size: 16px; color: #374151;">Great news! Your salary payout has been processed.</p>
-            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
-              <p style="font-size: 14px; color: #6b7280; margin: 0;">Amount Credited</p>
-              <p style="font-size: 32px; color: #10B981; font-weight: bold; margin: 10px 0;">₹${data.amount?.toLocaleString()}</p>
-            </div>
-            <p style="color: #4b5563;"><strong>Cycle:</strong> ${data.cycle}</p>
-            <p style="color: #4b5563;"><strong>Date:</strong> ${data.date}</p>
-            <p style="font-size: 14px; color: #6b7280;">You can view your complete payout history in your dashboard.</p>
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${data.dashboardUrl}" style="background: #10B981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: 600;">View Dashboard</a>
-            </div>
-          </div>
-        </div>
-      `
-    },
     passwordReset: {
       subject: `Password Reset - ${data.siteName || 'Blisswell'}`,
       html: `
@@ -238,19 +214,6 @@ exports.sendPurchaseEmail = async (user, order, product) => {
     orderId: order.id,
     date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
     dashboardUrl: `${siteUrl}/orders`,
-    siteName: process.env.SITE_NAME || 'Blisswell'
-  });
-};
-
-// Send payout notification email
-exports.sendPayoutEmail = async (user, amount, cycle) => {
-  const siteUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-  return sendEmail(user.email, 'payout', {
-    name: user.name,
-    amount: amount,
-    cycle: cycle,
-    date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-    dashboardUrl: `${siteUrl}/salary`,
     siteName: process.env.SITE_NAME || 'Blisswell'
   });
 };

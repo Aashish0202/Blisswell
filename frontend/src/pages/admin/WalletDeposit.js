@@ -134,7 +134,7 @@ const WalletDeposit = () => {
                         <span className={`badge badge-${user.is_active ? 'success' : 'danger'}`}>
                           {user.is_active ? 'Active' : 'Inactive'}
                         </span>
-                        {user.has_active_package && (
+                        {!!user.has_active_package && (
                           <span className="badge badge-info">Has Package</span>
                         )}
                       </div>

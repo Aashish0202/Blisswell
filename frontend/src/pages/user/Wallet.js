@@ -1,59 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { toast } from 'react-toastify';
-import { walletAPI, orderAPI } from '../../utils/api';
+import { Link } from 'react-router-dom';
+import { walletAPI } from '../../utils/api';
 import DashboardLayout from '../../components/DashboardLayout';
 import Pagination from '../../components/Pagination';
 
+// Consistent money formatting across all cards: ₹1,060.50
+const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 const Wallet = () => {
-  const [balance, setBalance] = useState(0);
+  const [earningsBalance, setEarningsBalance] = useState(0);
+  const [repurchaseBalance, setRepurchaseBalance] = useState(0);
+  const [nextUpgrade, setNextUpgrade] = useState(null);
   const [transactions, setTransactions] = useState([]);
-  const [depositAmount, setDepositAmount] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [razorpayLoaded, setRazorpayLoaded] = useState(false);
-  const [showDepositModal, setShowDepositModal] = useState(false);
-  const [packageAmounts, setPackageAmounts] = useState([]);
   const [txPage, setTxPage] = useState(1);
   const [txTotalPages, setTxTotalPages] = useState(1);
   const [txTotal, setTxTotal] = useState(0);
+  const [stats, setStats] = useState({ total_earned: 0, total_withdrawn: 0, total_spent: 0 });
   const [txFilter, setTxFilter] = useState('');
 
   useEffect(() => {
-    loadRazorpay();
     fetchBalance();
-    fetchPackageAmounts();
   }, []);
 
   useEffect(() => {
     fetchTransactions(txPage);
   }, [txPage]);
 
-  const fetchPackageAmounts = async () => {
-    try {
-      const response = await orderAPI.getProducts();
-      const products = response.data?.products || [];
-      // Extract unique prices from products
-      const uniquePrices = [...new Set(products.map(p => parseFloat(p.price)))];
-      // Sort prices in ascending order
-      uniquePrices.sort((a, b) => a - b);
-      setPackageAmounts(uniquePrices);
-    } catch (error) {
-      console.error('Failed to fetch package amounts:', error);
-      // Fallback to default amounts if fetch fails
-      setPackageAmounts([500, 1000, 2100, 5000]);
-    }
-  };
-
-  const loadRazorpay = () => {
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => setRazorpayLoaded(true);
-    document.body.appendChild(script);
-  };
-
   const fetchBalance = async () => {
     try {
       const response = await walletAPI.getBalance();
-      setBalance(response.data.balance);
+      setEarningsBalance(response.data.earnings_balance || 0);
+      setRepurchaseBalance(Number(response.data.repurchase_balance || 0));
+      setNextUpgrade(response.data.next_upgrade || null);
     } catch (error) {
       console.error('Failed to fetch balance');
     }
@@ -65,6 +43,9 @@ const Wallet = () => {
       setTransactions(response.data.transactions);
       setTxTotal(response.data.total || 0);
       setTxTotalPages(response.data.totalPages || 1);
+      // Lifetime totals computed server-side across ALL history — never
+      // sum amounts client-side here, transactions are paginated.
+      if (response.data.stats) setStats(response.data.stats);
     } catch (error) {
       console.error('Failed to fetch transactions');
     }
@@ -74,68 +55,6 @@ const Wallet = () => {
   const displayedTransactions = txFilter
     ? transactions.filter(t => t.type === txFilter)
     : transactions;
-
-  const handleDeposit = async () => {
-    const amount = parseFloat(depositAmount);
-    if (!amount || amount < 100) {
-      toast.error('Minimum deposit amount is ₹100');
-      return;
-    }
-
-    if (!razorpayLoaded) {
-      toast.error('Payment system is loading. Please try again.');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const orderResponse = await walletAPI.createDepositOrder(amount);
-      const { order_id, key_id } = orderResponse.data;
-
-      const options = {
-        key: key_id,
-        amount: amount * 100,
-        currency: 'INR',
-        name: 'Blisswell',
-        description: 'Wallet Deposit',
-        order_id: order_id,
-        handler: async (response) => {
-          try {
-            await walletAPI.verifyPayment({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-              amount: amount
-            });
-            toast.success('Payment successful! Wallet credited.');
-            fetchBalance();
-            fetchTransactions();
-            setDepositAmount('');
-            setShowDepositModal(false);
-          } catch (error) {
-            toast.error('Payment verification failed');
-          }
-        },
-        prefill: {
-          name: '',
-          email: ''
-        },
-        theme: {
-          color: '#2563EB'
-        }
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.open();
-    } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to initiate payment');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const quickAmounts = packageAmounts.length > 0 ? packageAmounts : [500, 1000, 2100, 5000];
 
   return (
     <DashboardLayout>
@@ -148,19 +67,16 @@ const Wallet = () => {
           </div>
         </div>
 
-        {/* Balance Card */}
-        <div className="wallet-card">
+        {/* Available for Withdrawal (earnings balance) */}
+        <div className="wallet-card earnings-card">
           <div className="wallet-content">
-            <div className="wallet-label">Available Balance</div>
-            <div className="wallet-balance">₹{balance?.toLocaleString() || 0}</div>
-            {/* <div className="wallet-actions">
-              <button
-                className="btn btn-primary"
-                onClick={() => setShowDepositModal(true)}
-              >
-                <span>💳</span> Add Funds
-              </button>
-            </div> */}
+            <div className="wallet-label">Available for Withdrawal</div>
+            <div className="wallet-balance">₹{fmt(earningsBalance)}</div>
+            <div className="wallet-actions">
+              <Link to="/withdrawal" className="btn btn-primary">
+                <span>🏦</span> Withdraw Earnings
+              </Link>
+            </div>
           </div>
           <div className="wallet-decoration">
             <div className="decoration-circle c1"></div>
@@ -168,26 +84,70 @@ const Wallet = () => {
           </div>
         </div>
 
-        {/* Quick Stats */}
+        {/* Repurchase Wallet (rank upgrade fund) */}
+        <div className="wallet-card repurchase-card">
+          <div className="wallet-content">
+            <div className="wallet-label">Repurchase Wallet</div>
+            <div className="wallet-balance">₹{fmt(repurchaseBalance)}</div>
+            <div className="repurchase-hint">
+              {nextUpgrade ? (
+                nextUpgrade.shortfall > 0 ? (
+                  <>Funds your next rank upgrade to <strong>{nextUpgrade.rank_name}</strong> (₹{nextUpgrade.price.toLocaleString('en-IN')}) — auto-bought when complete.</>
+                ) : (
+                  <>Ready: <strong>{nextUpgrade.rank_name}</strong> (₹{nextUpgrade.price.toLocaleString('en-IN')}) will be auto-purchased shortly.</>
+                )
+              ) : (
+                <>You've reached the top rank. Future higher packages will be auto-purchased as they're added.</>
+              )}
+            </div>
+            {nextUpgrade && (
+              <div className="upgrade-progress">
+                <div className="upgrade-progress-bar">
+                  <div
+                    className="upgrade-progress-fill"
+                    style={{ width: `${Math.min(100, Math.round(nextUpgrade.progress || 0))}%` }}
+                  ></div>
+                </div>
+                <span className="upgrade-progress-text">
+                  {Math.min(100, Math.round(nextUpgrade.progress || 0))}% of ₹{nextUpgrade.price.toLocaleString('en-IN')}
+                  {nextUpgrade.shortfall > 0 && ` · ₹${nextUpgrade.shortfall.toLocaleString('en-IN')} to go`}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="wallet-decoration">
+            <div className="decoration-circle c1"></div>
+            <div className="decoration-circle c2"></div>
+          </div>
+        </div>
+
+        {/* Quick Stats — lifetime totals computed server-side */}
         <div className="wallet-stats">
           <div className="wallet-stat-card">
             <span className="stat-icon">📈</span>
             <div className="stat-content">
-              <span className="stat-value">₹{transactions.filter(t => t.amount > 0).reduce((sum, t) => sum + parseFloat(t.amount), 0).toLocaleString()}</span>
-              <span className="stat-label">Total Deposited</span>
+              <span className="stat-value">₹{fmt(stats.total_earned)}</span>
+              <span className="stat-label">Total Earned</span>
             </div>
           </div>
           <div className="wallet-stat-card">
-            <span className="stat-icon">📉</span>
+            <span className="stat-icon">🏧</span>
             <div className="stat-content">
-              <span className="stat-value">₹{Math.abs(transactions.filter(t => t.amount < 0).reduce((sum, t) => sum + parseFloat(t.amount), 0)).toLocaleString()}</span>
+              <span className="stat-value">₹{fmt(stats.total_withdrawn)}</span>
+              <span className="stat-label">Total Withdrawn</span>
+            </div>
+          </div>
+          <div className="wallet-stat-card">
+            <span className="stat-icon">🛍️</span>
+            <div className="stat-content">
+              <span className="stat-value">₹{fmt(stats.total_spent)}</span>
               <span className="stat-label">Total Spent</span>
             </div>
           </div>
           <div className="wallet-stat-card">
             <span className="stat-icon">🔄</span>
             <div className="stat-content">
-              <span className="stat-value">{transactions.length}</span>
+              <span className="stat-value">{txTotal}</span>
               <span className="stat-label">Transactions</span>
             </div>
           </div>
@@ -208,8 +168,10 @@ const Wallet = () => {
                 <option value="deposit">Deposits</option>
                 <option value="purchase">Purchases</option>
                 <option value="refund">Refunds</option>
-                <option value="incentive">Incentives</option>
+                <option value="team_income">Level Income</option>
                 <option value="withdrawal">Withdrawals</option>
+                <option value="withdrawal_reversal">Withdrawal Reversals</option>
+                <option value="repurchase">Repurchase</option>
               </select>
             </div>
           </div>
@@ -228,7 +190,7 @@ const Wallet = () => {
                 </thead>
                 <tbody>
                   {displayedTransactions.map((tx) => (
-                    <tr key={tx.id}>
+                    <tr key={tx.id} className={tx.status === 'failed' ? 'tx-row-failed' : ''}>
                       <td>
                         <div className="tx-date">
                           <span className="date">{new Date(tx.created_at).toLocaleDateString()}</span>
@@ -241,14 +203,23 @@ const Wallet = () => {
                           {tx.type === 'purchase' && '🛍️ Purchase'}
                           {tx.type === 'refund' && '↩️ Refund'}
                           {tx.type === 'bonus' && '🎁 Bonus'}
-                          {tx.type === 'incentive' && '🌱 Incentive'}
+                          {tx.type === 'team_income' && '👥 Level Income'}
                           {tx.type === 'withdrawal' && '🏧 Withdrawal'}
+                          {tx.type === 'withdrawal_reversal' && '↩️ Withdrawal Reversal'}
+                          {tx.type === 'repurchase' && '🔄 Repurchase'}
                         </span>
                       </td>
                       <td>
-                        <span className={`tx-amount ${tx.amount < 0 ? 'negative' : 'positive'}`}>
-                          {tx.amount < 0 ? '-' : '+'}₹{Math.abs(tx.amount).toLocaleString()}
-                        </span>
+                        {/* Failed attempts never moved money — show muted, no +/- sign */}
+                        {tx.status === 'failed' ? (
+                          <span className="tx-amount failed" title="Payment failed — no money moved">
+                            ₹{fmt(Math.abs(tx.amount))}
+                          </span>
+                        ) : (
+                          <span className={`tx-amount ${tx.amount < 0 ? 'negative' : 'positive'}`}>
+                            {tx.amount < 0 ? '-' : '+'}₹{fmt(Math.abs(tx.amount))}
+                          </span>
+                        )}
                       </td>
                       <td className="tx-description">{tx.description || '-'}</td>
                       <td>
@@ -265,10 +236,7 @@ const Wallet = () => {
             <div className="empty-state">
               <div className="empty-icon">💳</div>
               <h4>{txFilter ? 'No matching transactions' : 'No transactions yet'}</h4>
-              <p>{txFilter ? 'Try a different filter.' : 'Add funds to your wallet to get started'}</p>
-              {/* <button className="btn btn-primary" onClick={() => setShowDepositModal(true)}>
-                Add Funds
-              </button> */}
+              <p>{txFilter ? 'Try a different filter.' : 'Your earnings and purchases will appear here'}</p>
             </div>
           )}
           {txTotal > 0 && (
@@ -281,67 +249,6 @@ const Wallet = () => {
           )}
         </div>
       </div>
-
-      {/* Deposit Modal */}
-      {showDepositModal && (
-        <div className="modal-overlay" onClick={() => setShowDepositModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Add Funds to Wallet</h3>
-              <button className="modal-close" onClick={() => setShowDepositModal(false)}>×</button>
-            </div>
-            <div className="modal-body">
-              <div className="deposit-form">
-                <label className="form-label">Select Amount</label>
-                <div className="quick-amounts">
-                  {quickAmounts.map(amount => (
-                    <button
-                      key={amount}
-                      className={`quick-amount-btn ${depositAmount === amount.toString() ? 'active' : ''}`}
-                      onClick={() => setDepositAmount(amount.toString())}
-                    >
-                      ₹{amount.toLocaleString()}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="form-group" style={{ marginTop: '1rem' }}>
-                  <label className="form-label">Or enter custom amount</label>
-                  <div className="amount-input-wrapper">
-                    <span className="currency">₹</span>
-                    <input
-                      type="number"
-                      className="form-input amount-input"
-                      placeholder="Enter amount"
-                      value={depositAmount}
-                      onChange={(e) => setDepositAmount(e.target.value)}
-                      min="100"
-                    />
-                  </div>
-                  <span className="form-hint">Minimum deposit: ₹100</span>
-                </div>
-
-                <div className="deposit-note">
-                  <span className="note-icon">🔒</span>
-                  <span>Payments secured by Razorpay. Your financial information is encrypted.</span>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowDepositModal(false)}>
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={handleDeposit}
-                disabled={loading || !depositAmount || parseFloat(depositAmount) < 100}
-              >
-                {loading ? 'Processing...' : `Pay ₹${parseFloat(depositAmount || 0).toLocaleString()}`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <style>{`
         .wallet-page {
@@ -408,16 +315,64 @@ const Wallet = () => {
           color: var(--primary-700);
         }
 
+        .earnings-card {
+          margin-top: 1rem;
+          background: linear-gradient(135deg, var(--primary-600), var(--accent-500));
+        }
+        .earnings-card .wallet-label,
+        .earnings-card .wallet-balance {
+          color: white;
+        }
+        .earnings-card .wallet-actions .btn {
+          background: white;
+          color: var(--primary-700);
+        }
+
+        .repurchase-card {
+          margin-top: 1rem;
+          background: linear-gradient(135deg, var(--accent-600), var(--accent-800));
+        }
+        .repurchase-card .wallet-label,
+        .repurchase-card .wallet-balance {
+          color: white;
+        }
+        .repurchase-hint {
+          font-size: 0.8125rem;
+          color: rgba(255, 255, 255, 0.85);
+          max-width: 480px;
+          margin-bottom: 0.75rem;
+        }
+        .upgrade-progress {
+          max-width: 480px;
+        }
+        .upgrade-progress-bar {
+          height: 8px;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.25);
+          overflow: hidden;
+          margin-bottom: 0.375rem;
+        }
+        .upgrade-progress-fill {
+          height: 100%;
+          border-radius: 999px;
+          background: white;
+          transition: width 0.4s ease;
+        }
+        .upgrade-progress-text {
+          font-size: 0.75rem;
+          color: rgba(255, 255, 255, 0.9);
+        }
+
         .wallet-stats {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(4, 1fr);
           gap: 1rem;
           margin-bottom: 1.5rem;
         }
 
         @media (max-width: 768px) {
           .wallet-stats {
-            grid-template-columns: 1fr;
+            grid-template-columns: repeat(2, 1fr);
           }
         }
 
@@ -493,11 +448,6 @@ const Wallet = () => {
           color: #C2410C;
         }
 
-        .tx-type.tx-bonus {
-          background: #FEF3C7;
-          color: #B45309;
-        }
-
         .tx-amount {
           font-weight: 700;
           font-size: 0.9375rem;
@@ -509,6 +459,17 @@ const Wallet = () => {
 
         .tx-amount.negative {
           color: var(--status-danger);
+        }
+
+        /* Failed payment attempts never moved money — muted + struck through */
+        .tx-amount.failed {
+          color: var(--gray-400);
+          text-decoration: line-through;
+          font-weight: 500;
+        }
+
+        .tx-row-failed td {
+          opacity: 0.75;
         }
 
         .tx-description {
@@ -540,86 +501,6 @@ const Wallet = () => {
           color: var(--gray-500);
           font-size: 0.875rem;
           margin-bottom: 1rem;
-        }
-
-        /* Modal Styles */
-        .modal {
-          max-width: 480px;
-        }
-
-        .deposit-form {
-          padding: 0.5rem 0;
-        }
-
-        .quick-amounts {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 0.75rem;
-        }
-
-        @media (max-width: 480px) {
-          .quick-amounts {
-            grid-template-columns: repeat(2, 1fr);
-          }
-        }
-
-        .quick-amount-btn {
-          padding: 0.875rem 1rem;
-          border: 2px solid var(--gray-200);
-          border-radius: var(--radius-lg);
-          background: white;
-          font-size: 0.875rem;
-          font-weight: 600;
-          color: var(--gray-700);
-          cursor: pointer;
-          transition: all 0.2s ease;
-        }
-
-        .quick-amount-btn:hover {
-          border-color: var(--primary-300);
-          background: var(--primary-50);
-        }
-
-        .quick-amount-btn.active {
-          border-color: var(--primary-500);
-          background: var(--primary-50);
-          color: var(--primary-700);
-        }
-
-        .amount-input-wrapper {
-          position: relative;
-          display: flex;
-          align-items: center;
-        }
-
-        .currency {
-          position: absolute;
-          left: 1rem;
-          font-size: 1.125rem;
-          font-weight: 600;
-          color: var(--gray-500);
-        }
-
-        .amount-input {
-          padding-left: 2.5rem;
-          font-size: 1.25rem;
-          font-weight: 600;
-        }
-
-        .deposit-note {
-          display: flex;
-          align-items: flex-start;
-          gap: 0.75rem;
-          margin-top: 1rem;
-          padding: 1rem;
-          background: var(--gray-50);
-          border-radius: var(--radius-lg);
-          font-size: 0.8125rem;
-          color: var(--gray-600);
-        }
-
-        .note-icon {
-          font-size: 1rem;
         }
       `}</style>
     </DashboardLayout>

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 import { userAPI, orderAPI } from '../../utils/api';
+import { RANK_COLORS } from '../../utils/rankTheme';
 import DashboardLayout from '../../components/DashboardLayout';
 import SmartActionCard, { getSmartCards } from '../../components/SmartActionCard';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
@@ -96,6 +97,12 @@ const ImageSlider = ({ images, getImageUrl, alt, onImageClick }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const intervalRef = useRef(null);
 
+  // Reset to the first image whenever the image set changes (e.g. the
+  // buyer switches to another design tab on the product card).
+  useEffect(() => {
+    setCurrentIndex(0);
+  }, [images]);
+
   useEffect(() => {
     if (images && images.length > 1) {
       intervalRef.current = setInterval(() => {
@@ -146,6 +153,9 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
+  // Per-product selected design index (product id → design index), so
+  // clicking a design tab on a product card swaps that card's images.
+  const [selectedDesigns, setSelectedDesigns] = useState({});
   const [lightbox, setLightbox] = useState({ isOpen: false, images: [], currentIndex: 0 });
   const [youtubeModal, setYoutubeModal] = useState({ isOpen: false, youtubeLink: '' });
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
@@ -222,6 +232,10 @@ const Dashboard = () => {
     }));
   };
 
+  const selectProductDesign = (productId, designIdx) => {
+    setSelectedDesigns(prev => ({ ...prev, [productId]: designIdx }));
+  };
+
   const openPurchaseDialog = (product) => {
     setSelectedProduct(product);
     setShowPurchaseModal(true);
@@ -256,7 +270,7 @@ const Dashboard = () => {
   const smartCards = getSmartCards(dashboard?.user, dashboard?.wallet, dashboard?.referrals);
   const user = { ...authUser, ...(dashboard?.user || {}), ...(profile || {}) };
   const wallet = dashboard?.wallet || {};
-  const salary = dashboard?.salary || {};
+  const earnings = dashboard?.earnings || {};
   const referrals = dashboard?.referrals || {};
 
   // Resolve the user's uploaded profile photo (if any) to a full URL
@@ -298,6 +312,16 @@ const Dashboard = () => {
                 <span className={`badge ${user.has_active_package ? 'badge-success' : 'badge-warning'}`}>
                   {user.has_active_package ? '✓ Active Member' : '○ Inactive'}
                 </span>
+                {!!user.has_active_package && user.rank_name && (
+                  <span
+                    className="badge rank-badge-hero"
+                    style={RANK_COLORS[user.rank_name] ? {
+                      background: `linear-gradient(135deg, ${RANK_COLORS[user.rank_name].main}, ${RANK_COLORS[user.rank_name].light})`,
+                      color: RANK_COLORS[user.rank_name].dark,
+                      borderColor: RANK_COLORS[user.rank_name].light
+                    } : undefined}
+                  >★ {user.rank_name} Rank</span>
+                )}
                 <span className={`badge badge-${user.pan_status === 'approved' ? 'success' : user.pan_status === 'pending' ? 'warning' : 'danger'}`}>
                   PAN: {user.pan_status?.toUpperCase() || 'PENDING'}
                 </span>
@@ -328,7 +352,7 @@ const Dashboard = () => {
             </div>
             <div className="stat-divider"></div>
             <div className="stat-item">
-              <span className="stat-value">₹{parseFloat(salary.pending_amount || 0).toLocaleString()}</span>
+              <span className="stat-value">₹{parseFloat(earnings.pendingWithdrawal || 0).toLocaleString()}</span>
               <span className="stat-label">Pending</span>
             </div>
           </div>
@@ -337,10 +361,11 @@ const Dashboard = () => {
         {/* Quick Stats Grid */}
         <div className="stats-grid-enhanced">
           <Link to="/wallet" className="stat-card-enhanced success animate-in">
-            <div className="stat-card-icon">💰</div>
+            <div className="stat-card-icon">🔄</div>
             <div className="stat-card-content">
-              <span className="stat-card-value">₹{parseFloat(wallet.balance || 0).toLocaleString()}</span>
-              <span className="stat-card-label">Wallet Balance</span>
+              <span className="stat-card-value">₹{parseFloat(wallet.repurchase_balance || 0).toLocaleString()}</span>
+              <span className="stat-card-label">Repurchase Wallet</span>
+              <div className="stat-card-sub">Funds your next rank</div>
             </div>
             <div className="stat-card-arrow">→</div>
           </Link>
@@ -349,13 +374,13 @@ const Dashboard = () => {
             <div className="stat-card-content">
               <span className="stat-card-value">{referrals.total || 0}</span>
               <span className="stat-card-label">My Team</span>
+              <div className="stat-card-sub">{referrals.active || 0} active</div>
             </div>
-            <div className="stat-card-sub">{referrals.active || 0} active</div>
           </Link>
-          <Link to="/salary" className="stat-card-enhanced warning animate-in" style={{ animationDelay: '0.2s' }}>
+          <Link to="/withdrawal" className="stat-card-enhanced warning animate-in" style={{ animationDelay: '0.2s' }}>
             <div className="stat-card-icon">💸</div>
             <div className="stat-card-content">
-              <span className="stat-card-value">₹{parseFloat(salary.pending_amount || 0).toLocaleString()}</span>
+              <span className="stat-card-value">₹{parseFloat(earnings.pendingWithdrawal || 0).toLocaleString()}</span>
               <span className="stat-card-label">Pending Withdrawal</span>
             </div>
             <div className="stat-card-arrow">→</div>
@@ -363,12 +388,43 @@ const Dashboard = () => {
           <div className="stat-card-enhanced accent animate-in" style={{ animationDelay: '0.3s' }}>
             <div className="stat-card-icon">📊</div>
             <div className="stat-card-content">
-              <span className="stat-card-value">₹{parseFloat(salary.total_earned || 0).toLocaleString()}</span>
+              <span className="stat-card-value">₹{parseFloat(earnings.totalEarnings || 0).toLocaleString()}</span>
               <span className="stat-card-label">Total Earned</span>
+              <div className="stat-card-sub">Lifetime income</div>
             </div>
-            <div className="stat-card-sub">Lifetime income</div>
           </div>
         </div>
+
+        {/* Rank Upgrade Progress — !! coerces has_active_package (0/1 from the
+            API) to boolean so React doesn't render a stray "0" when inactive */}
+        {!!user.has_active_package && dashboard?.upgrade && !dashboard.upgrade.at_top_rank && (
+          <Link to="/wallet" className="upgrade-card animate-in">
+            <div className="upgrade-card-icon">🚀</div>
+            <div className="upgrade-card-content">
+              <span className="upgrade-card-title">
+                Next Rank: {dashboard.upgrade.next_rank_name} — ₹{parseFloat(dashboard.upgrade.next_price).toLocaleString()}
+              </span>
+              <div className="upgrade-card-bar">
+                <div className="upgrade-card-fill" style={{ width: `${Math.min(100, Math.round(dashboard.upgrade.progress || 0))}%` }}></div>
+              </div>
+              <span className="upgrade-card-sub">
+                {dashboard.upgrade.shortfall > 0
+                  ? `Repurchase Wallet: ₹${Math.max(0, parseFloat(dashboard.upgrade.next_price) - dashboard.upgrade.shortfall).toLocaleString()} saved · ₹${parseFloat(dashboard.upgrade.shortfall).toLocaleString()} to go — 20% of every withdrawal funds this automatically`
+                  : 'Repurchase Wallet ready — upgrade happens automatically'}
+              </span>
+            </div>
+            <span className="upgrade-card-arrow">→</span>
+          </Link>
+        )}
+        {!!user.has_active_package && dashboard?.upgrade?.at_top_rank && (
+          <div className="upgrade-card top-rank animate-in">
+            <div className="upgrade-card-icon">🏆</div>
+            <div className="upgrade-card-content">
+              <span className="upgrade-card-title">Top rank reached: {user.rank_name}</span>
+              <span className="upgrade-card-sub">Repurchase balance keeps accumulating — higher packages will be added in future and bought automatically.</span>
+            </div>
+          </div>
+        )}
 
         {/* Navigation Tabs */}
         <div className="tabs-container">
@@ -395,15 +451,6 @@ const Dashboard = () => {
                 <h3 className="section-title">⚡ Quick Actions</h3>
               </div>
               <div className="quick-actions-grid">
-                <Link to="/wallet" className="action-tile">
-                  <div className="action-icon-wrapper blue">
-                    <span>💰</span>
-                  </div>
-                  <div className="action-info">
-                    <span className="action-title">Add Funds</span>
-                    <span className="action-desc">Top up wallet</span>
-                  </div>
-                </Link>
                 <Link to="/orders" className="action-tile primary">
                   <div className="action-icon-wrapper green">
                     <span>🛍️</span>
@@ -422,7 +469,7 @@ const Dashboard = () => {
                     <span className="action-desc">Invite friends</span>
                   </div>
                 </button>
-                <Link to="/salary" className="action-tile">
+                <Link to="/earnings" className="action-tile">
                   <div className="action-icon-wrapper orange">
                     <span>💸</span>
                   </div>
@@ -445,8 +492,6 @@ const Dashboard = () => {
                 </div>
                 <div className="featured-products-grid">
                   {products.slice(0, 2).map((product, index) => {
-                    const incentiveAmount = parseFloat(product.daily_amount || product.salary_amount || 50);
-                    const incentiveDays = product.days || product.salary_duration || 15;
                     return (
                       <div key={product.id} className="featured-product-tile animate-in" style={{ animationDelay: `${index * 0.1}s` }}>
                         <div className="featured-product-image">
@@ -459,7 +504,9 @@ const Dashboard = () => {
                         <div className="featured-product-content">
                           <h4>{product.name}</h4>
                           <div className="featured-incentive">
-                            <span className="incentive-badge">💰 ₹{incentiveAmount.toLocaleString()}/day × {incentiveDays}</span>
+                            <span className="incentive-badge">
+                              {product.rank_name ? `★ ${product.rank_name} Rank` : `★ Rank Package`}
+                            </span>
                           </div>
                           <div className="featured-footer">
                             <span className="featured-price">₹{parseFloat(product.price).toLocaleString()}</span>
@@ -480,22 +527,17 @@ const Dashboard = () => {
               </div>
               <div className="income-cards-grid">
                 <div className="income-mini-card">
-                  <span className="income-mini-label">Earning Wallet</span>
-                  <span className="income-mini-value">₹{parseFloat(salary.total_earned || 0).toLocaleString()}</span>
-                  <span className="income-mini-sub">Lifetime earned</span>
-                </div>
-                <div className="income-mini-card">
-                  <span className="income-mini-label">Withdrawal Wallet</span>
-                  <span className="income-mini-value">₹{parseFloat(salary.earnings_balance || 0).toLocaleString()}</span>
-                  <span className="income-mini-sub">Withdrawable balance</span>
+                  <span className="income-mini-label">Level Income</span>
+                  <span className="income-mini-value">₹{parseFloat(earnings.teamIncomeTotal || 0).toLocaleString()}</span>
+                  <span className="income-mini-sub">Purchases + repurchases</span>
                 </div>
                 <div className="income-mini-card">
                   <span className="income-mini-label">Pending Withdrawals</span>
-                  <span className="income-mini-value">₹{parseFloat(salary.pending_amount || 0).toLocaleString()}</span>
+                  <span className="income-mini-value">₹{parseFloat(earnings.pendingWithdrawal || 0).toLocaleString()}</span>
                 </div>
                 <div className="income-mini-card highlight">
-                  <span className="income-mini-label">Active Cycles</span>
-                  <span className="income-mini-value">{salary.active_cycles || 0}</span>
+                  <span className="income-mini-label">Available for Withdrawal</span>
+                  <span className="income-mini-value">₹{parseFloat(earnings.availableForWithdrawal || 0).toLocaleString()}</span>
                 </div>
               </div>
             </div>
@@ -534,22 +576,27 @@ const Dashboard = () => {
           <div className="tab-content animate-fade-in">
             <div className="shop-hero">
               <h2>🛍️ Premium Products</h2>
-              <p>Purchase products and earn daily incentive for each active referral</p>
+              <p>Purchase a rank package to activate your account and earn level income</p>
             </div>
             <div className="products-grid-dashboard">
               {products.length > 0 ? products.map((product, index) => {
-                const dailyAmount = parseFloat(product.daily_amount || product.salary_amount || 50);
-                const incentiveDays = parseInt(product.days || product.salary_duration || 15);
-                const totalPayout = dailyAmount * incentiveDays;
-
                 // Get images array or fallback to single image
                 const productImages = product.images && product.images.length > 0
                   ? product.images
                   : product.image ? [product.image] : [];
 
+                // Designs (optional variants): the selected design's images
+                // take over the card's image slider until it has images.
+                const productDesigns = Array.isArray(product.designs) ? product.designs : [];
+                const designIdx = selectedDesigns[product.id] ?? 0;
+                const selectedDesign = productDesigns[designIdx] || null;
+                const displayImages = selectedDesign && selectedDesign.images && selectedDesign.images.length > 0
+                  ? selectedDesign.images
+                  : productImages;
+
                 const openLightbox = () => {
-                  if (productImages.length > 0) {
-                    setLightbox({ isOpen: true, images: productImages, currentIndex: 0 });
+                  if (displayImages.length > 0) {
+                    setLightbox({ isOpen: true, images: displayImages, currentIndex: 0 });
                   }
                 };
 
@@ -559,11 +606,11 @@ const Dashboard = () => {
                     className="product-card-enhanced hover-lift animate-card"
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
-                    <div className="product-image-wrapper" onClick={openLightbox} style={{ cursor: productImages.length > 0 ? 'pointer' : 'default' }}>
+                    <div className="product-image-wrapper" onClick={openLightbox} style={{ cursor: displayImages.length > 0 ? 'pointer' : 'default' }}>
                       <ImageSlider
-                        images={productImages}
+                        images={displayImages}
                         getImageUrl={getImageUrl}
-                        alt={product.name}
+                        alt={selectedDesign ? `${product.name} - ${selectedDesign.name}` : product.name}
                         onImageClick={openLightbox}
                       />
                       {!product.is_active && (
@@ -572,6 +619,34 @@ const Dashboard = () => {
                         </div>
                       )}
                     </div>
+                    {productDesigns.length > 0 && (
+                      <div className="card-design-tabs">
+                        {productDesigns.map((d, i) => (
+                          <button
+                            key={`${d.name}-${i}`}
+                            type="button"
+                            className={`card-design-tab${i === designIdx ? ' active' : ''}`}
+                            onClick={() => selectProductDesign(product.id, i)}
+                          >
+                            {d.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {selectedDesign && selectedDesign.description && (
+                      <div className="card-design-desc">{selectedDesign.description}</div>
+                    )}
+                    {selectedDesign && selectedDesign.video_link && (
+                      <div className="card-design-video">
+                        <button
+                          className="watch-video-btn"
+                          onClick={() => setYoutubeModal({ isOpen: true, youtubeLink: selectedDesign.video_link })}
+                        >
+                          <span className="watch-video-icon">▶</span>
+                          Watch {selectedDesign.name} Video
+                        </button>
+                      </div>
+                    )}
                     <div className="product-content">
                       <h4 className="product-title">{product.name}</h4>
                       <div className={`product-desc-wrapper ${expandedDescriptions[product.id] ? 'expanded' : ''}`}>
@@ -588,27 +663,25 @@ const Dashboard = () => {
                         )}
                       </div>
 
-                      {/* Salary Benefits Card */}
+                      {/* Product Benefits Card */}
                       <div className="salary-benefits-card">
                         <div className="benefit-header">
                           <span className="benefit-icon">💰</span>
-                          <span className="benefit-title">Daily Referral Incentive</span>
+                          <span className="benefit-title">Product Benefits</span>
                         </div>
                         <div className="benefit-details">
                           <div className="benefit-row">
-                            <span className="benefit-label">Daily Incentive</span>
-                            <span className="benefit-value">₹{dailyAmount.toLocaleString()}/day</span>
-                          </div>
-                          <div className="benefit-row">
-                            <span className="benefit-label">Duration</span>
-                            <span className="benefit-value">{incentiveDays} days</span>
+                            <span className="benefit-label">Rank</span>
+                            <span className="benefit-value">{product.rank_name || 'Rank Package'}</span>
                           </div>
                           <div className="benefit-row highlight">
-                            <span className="benefit-label">Total Earning</span>
-                            <span className="benefit-value total">₹{totalPayout.toLocaleString()}</span>
+                            <span className="benefit-label">Level Income</span>
+                            <span className="benefit-value total">
+                              {product.rank_name ? `${product.rank_name} · 10 levels` : '10 levels per rank'}
+                            </span>
                           </div>
                         </div>
-                        <p className="benefit-note">Per active referral who purchases this product</p>
+                        <p className="benefit-note">Income from your team's purchases & auto rank upgrades</p>
                       </div>
 
                       {product.youtube_link && (
@@ -657,7 +730,7 @@ const Dashboard = () => {
                 <div className="referral-icon">🔗</div>
                 <div className="referral-text">
                   <h3>Share & Earn</h3>
-                  <p>Earn daily incentive for every active team member who purchases</p>
+                  <p>Earn Team Income when your downline purchases — 10 levels per rank (Star, Silver, Gold, Platinum)</p>
                 </div>
               </div>
               <div className="referral-link-box">
@@ -762,12 +835,12 @@ const Dashboard = () => {
 
         /* Profile Hero Card */
         .profile-hero {
-          background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 50%, #172554 100%);
+          background: linear-gradient(135deg, #073C39 0%, #0B4541 55%, #073C39 100%);
           color: #ffffff;
           border-radius: var(--radius-xl);
           overflow: hidden;
           margin-bottom: 1.5rem;
-          box-shadow: 0 10px 40px -10px rgba(37, 99, 235, 0.5),
+          box-shadow: 0 10px 40px -10px rgba(7, 60, 57, 0.5),
                       0 4px 20px -5px rgba(0, 0, 0, 0.2);
           position: relative;
         }
@@ -779,7 +852,7 @@ const Dashboard = () => {
           right: 0;
           width: 200px;
           height: 200px;
-          background: radial-gradient(circle, rgba(59, 130, 246, 0.3) 0%, transparent 70%);
+          background: radial-gradient(circle, rgba(11, 69, 65, 0.3) 0%, transparent 70%);
           pointer-events: none;
         }
 
@@ -800,7 +873,7 @@ const Dashboard = () => {
         .profile-avatar {
           width: 72px;
           height: 72px;
-          background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+          background: linear-gradient(135deg, #5D8172 0%, #4E6B5F 100%);
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -827,11 +900,11 @@ const Dashboard = () => {
           width: 18px;
           height: 18px;
           border-radius: 50%;
-          border: 3px solid #1e3a8a;
+          border: 3px solid #072B29;
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
         }
 
-        .status-dot.active { background: #10B981; }
+        .status-dot.active { background: #5D8172; }
         .status-dot.inactive { background: #F59E0B; }
 
         .profile-info {
@@ -877,7 +950,7 @@ const Dashboard = () => {
 
         .profile-hero .badge-success {
           background: rgba(16, 185, 129, 0.25);
-          color: #6ee7b7;
+          color: #A8C4AC;
           border: 1px solid rgba(16, 185, 129, 0.3);
         }
 
@@ -891,6 +964,84 @@ const Dashboard = () => {
           background: rgba(239, 68, 68, 0.25);
           color: #fca5a5;
           border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .profile-hero .rank-badge-hero {
+          background: linear-gradient(135deg, var(--gold-500, #CFAA57), var(--gold-300, #ECCA7B));
+          color: #2B1F07;
+          border: 1px solid rgba(236, 202, 123, 0.7);
+          box-shadow: 0 0 16px rgba(207, 170, 87, 0.5);
+          font-weight: 700;
+        }
+
+        /* Rank Upgrade Progress Card */
+        .upgrade-card {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 1.1rem 1.25rem;
+          background: white;
+          border-radius: var(--radius-xl);
+          margin-bottom: 1.5rem;
+          box-shadow: var(--shadow-card);
+          border: 1px solid var(--gray-100);
+          border-left: 4px solid #F59E0B;
+          text-decoration: none;
+          transition: all 0.25s ease;
+        }
+
+        .upgrade-card:hover {
+          transform: translateY(-2px);
+          box-shadow: var(--shadow-md);
+        }
+
+        .upgrade-card.top-rank {
+          border-left-color: var(--accent-500);
+          cursor: default;
+        }
+
+        .upgrade-card-icon {
+          font-size: 1.75rem;
+          flex-shrink: 0;
+        }
+
+        .upgrade-card-content {
+          flex: 1;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.375rem;
+        }
+
+        .upgrade-card-title {
+          font-size: 0.9375rem;
+          font-weight: 700;
+          color: var(--gray-900);
+        }
+
+        .upgrade-card-bar {
+          height: 7px;
+          background: var(--gray-200);
+          border-radius: var(--radius-full);
+          overflow: hidden;
+        }
+
+        .upgrade-card-fill {
+          height: 100%;
+          background: linear-gradient(90deg, #F59E0B, #FCD34D);
+          border-radius: var(--radius-full);
+          transition: width 0.4s ease;
+        }
+
+        .upgrade-card-sub {
+          font-size: 0.75rem;
+          color: var(--gray-500);
+        }
+
+        .upgrade-card-arrow {
+          color: var(--gray-400);
+          font-size: 1.25rem;
+          flex-shrink: 0;
         }
 
         .profile-referral {
@@ -998,19 +1149,43 @@ const Dashboard = () => {
           box-shadow: var(--shadow-lg);
         }
 
-        .stat-card-enhanced::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 4px;
-          height: 100%;
+        /* Colorful brand-gradient cards (white text) */
+        .stat-card-enhanced.success {
+          background: linear-gradient(135deg, #5D8172 0%, #40584E 100%);
+          border: none;
+          box-shadow: 0 4px 20px rgba(93, 129, 114, 0.35);
+        }
+        .stat-card-enhanced.info {
+          background: linear-gradient(135deg, #073C39 0%, #0B4541 100%);
+          border: none;
+          box-shadow: 0 4px 20px rgba(7, 60, 57, 0.35);
+        }
+        .stat-card-enhanced.warning {
+          background: linear-gradient(135deg, #CFAA57 0%, #996F19 100%);
+          border: none;
+          box-shadow: 0 4px 20px rgba(153, 111, 25, 0.35);
+        }
+        .stat-card-enhanced.accent {
+          background: linear-gradient(135deg, #073C39 0%, #5D8172 100%);
+          border: none;
+          box-shadow: 0 4px 20px rgba(7, 60, 57, 0.3);
         }
 
-        .stat-card-enhanced.success::before { background: var(--accent-500); }
-        .stat-card-enhanced.info::before { background: var(--primary-500); }
-        .stat-card-enhanced.warning::before { background: #F59E0B; }
-        .stat-card-enhanced.accent::before { background: linear-gradient(to bottom, var(--primary-500), var(--accent-500)); }
+        /* Soft decorative circle, like the wallet cards */
+        .stat-card-enhanced.success::after,
+        .stat-card-enhanced.info::after,
+        .stat-card-enhanced.warning::after,
+        .stat-card-enhanced.accent::after {
+          content: '';
+          position: absolute;
+          right: -18px;
+          bottom: -18px;
+          width: 80px;
+          height: 80px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.12);
+          pointer-events: none;
+        }
 
         .stat-card-icon {
           width: 48px;
@@ -1021,42 +1196,52 @@ const Dashboard = () => {
           justify-content: center;
           font-size: 1.5rem;
           flex-shrink: 0;
+          position: relative;
+          z-index: 1;
         }
 
-        .stat-card-enhanced.success .stat-card-icon { background: var(--accent-50); }
-        .stat-card-enhanced.info .stat-card-icon { background: var(--primary-50); }
-        .stat-card-enhanced.warning .stat-card-icon { background: #FEF3C7; }
-        .stat-card-enhanced.accent .stat-card-icon { background: linear-gradient(135deg, var(--primary-50), var(--accent-50)); }
+        .stat-card-enhanced.success .stat-card-icon,
+        .stat-card-enhanced.info .stat-card-icon,
+        .stat-card-enhanced.warning .stat-card-icon,
+        .stat-card-enhanced.accent .stat-card-icon {
+          background: rgba(255, 255, 255, 0.18);
+        }
 
         .stat-card-content {
           flex: 1;
           min-width: 0;
+          position: relative;
+          z-index: 1;
         }
 
         .stat-card-value {
           display: block;
           font-size: 1.375rem;
           font-weight: 700;
-          color: var(--gray-900);
+          color: #FFFFFF;
           line-height: 1.2;
         }
 
         .stat-card-label {
+          display: block;
           font-size: 0.75rem;
-          color: var(--gray-500);
+          color: rgba(255, 255, 255, 0.85);
         }
 
         .stat-card-sub {
+          display: block;
           font-size: 0.6875rem;
-          color: var(--gray-400);
+          color: rgba(255, 255, 255, 0.7);
           margin-top: 0.125rem;
         }
 
         .stat-card-arrow {
-          color: var(--gray-400);
+          color: rgba(255, 255, 255, 0.9);
           font-size: 1.25rem;
           opacity: 0;
           transition: all 0.2s;
+          position: relative;
+          z-index: 1;
         }
 
         .stat-card-enhanced:hover .stat-card-arrow {
@@ -1483,7 +1668,7 @@ const Dashboard = () => {
           inset: 0;
           border-radius: inherit;
           padding: 2px;
-          background: linear-gradient(135deg, #2563eb, #059669);
+          background: linear-gradient(135deg, #073C39, #5D8172);
           -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           -webkit-mask-composite: xor;
                   mask-composite: exclude;
@@ -1664,6 +1849,47 @@ const Dashboard = () => {
           color: white;
           font-weight: 600;
           font-size: 0.875rem;
+        }
+
+        /* Design tabs on product cards — swap the card's image slider */
+        .card-design-tabs {
+          display: flex;
+          gap: 0.4rem;
+          flex-wrap: wrap;
+          padding: 0.75rem 1.25rem 0;
+        }
+
+        .card-design-tab {
+          padding: 0.35rem 0.7rem;
+          border: 1px solid var(--gray-200);
+          background: var(--gray-50, #f9fafb);
+          color: var(--gray-600, #4b5563);
+          border-radius: 999px;
+          font-size: 0.75rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .card-design-tab:hover {
+          border-color: var(--primary-500, #5D8172);
+          color: var(--primary-600, #073C39);
+        }
+
+        .card-design-tab.active {
+          background: var(--primary-600, #073C39);
+          border-color: var(--primary-600, #073C39);
+          color: white;
+        }
+
+        .card-design-desc {
+          padding: 0.35rem 1.25rem 0;
+          font-size: 0.75rem;
+          color: var(--gray-500, #6b7280);
+        }
+
+        .card-design-video {
+          padding: 0.5rem 1.25rem 0;
         }
 
         .product-content {
@@ -2030,7 +2256,7 @@ const Dashboard = () => {
           padding: 0.625rem;
           font-size: 0.875rem;
           font-weight: 600;
-          color: var(--primary-600, #4f46e5);
+          color: var(--primary-600, #B18B36);
           text-decoration: none;
           border-radius: var(--radius-lg, 0.5rem);
           transition: background 0.2s;
@@ -2251,8 +2477,10 @@ const Dashboard = () => {
 
         @media (max-width: 480px) {
           .profile-hero {
-            margin: 0 -1rem 1rem -1rem;
-            border-radius: 0;
+            /* Normal centered card — the old negative-margin bleed (0 -1rem 1rem -1rem)
+               pushed the card off the left screen edge and 16px short on the right */
+            margin: 0 auto 1rem auto;
+            width: 100%;
           }
 
           .profile-avatar {

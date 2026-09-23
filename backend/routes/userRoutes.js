@@ -23,12 +23,13 @@ router.post('/kyc', userController.submitKYC);
 router.get('/referrals', userController.getReferrals);
 router.get('/referrals/summary', userController.getReferralSummary);
 router.get('/referrals/:id/purchases', userController.getReferralPurchases);
+router.get('/team/downline', userController.getDownlineTeam);
 
-// Salary
-router.get('/salary/summary', userController.getSalarySummary);
-router.get('/salary-cycles', userController.getSalaryCycles);
-router.get('/payouts', userController.getPayouts);
-router.get('/earnings', userController.getEarnings);
+// Earnings + Team Income (new income model)
+router.get('/earnings', userController.getEarningsSummary);
+router.get('/earnings/breakdown', userController.getEarningsBreakdown);
+router.get('/team-income', userController.getTeamIncome);
+router.get('/team-income/history', userController.getTeamIncomeHistory);
 
 // Wallet
 router.get('/wallet/transactions', userController.getWalletTransactions);

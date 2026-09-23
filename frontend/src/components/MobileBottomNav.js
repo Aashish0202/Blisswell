@@ -22,7 +22,7 @@ const MobileBottomNav = () => {
     { path: '/admin', label: 'Home', icon: '📊' },
     { path: '/admin/users', label: 'Users', icon: '👥' },
     { path: '/admin/orders', label: 'Orders', icon: '📦' },
-    { path: '/admin/salary', label: 'Salary', icon: '💸' },
+    { path: '/admin/withdrawals', label: 'Withdrawals', icon: '💸' },
     { path: '/admin/settings', label: 'More', icon: '⚙️' }
   ];
 

@@ -6,6 +6,7 @@ import DashboardLayout from '../../components/DashboardLayout';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
 import Pagination from '../../components/Pagination';
+import { rankBadgeClass } from '../../utils/rankTheme';
 
 const Referrals = () => {
   const [referrals, setReferrals] = useState([]);
@@ -17,14 +18,60 @@ const Referrals = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState({ total_referrals: 0, active_referrals: 0, total_direct_business: 0, total_bonus_received: 0 });
+  const [summary, setSummary] = useState({ total_referrals: 0, active_referrals: 0, total_direct_business: 0, total_team_business: 0, total_team_income: 0 });
   const { user } = useSelector((state) => state.auth);
+
+  // 10-level downline ("My Network") — search + level filter
+  const [downline, setDownline] = useState([]);
+  const [downlineLoading, setDownlineLoading] = useState(true);
+  const [downlinePage, setDownlinePage] = useState(1);
+  const [downlineTotalPages, setDownlineTotalPages] = useState(1);
+  const [downlineTotal, setDownlineTotal] = useState(0);
+  const [levelCounts, setLevelCounts] = useState([]);
+  const [levelFilter, setLevelFilter] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [downlineSearch, setDownlineSearch] = useState('');
 
   useEffect(() => {
     fetchReferrals();
     fetchSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  useEffect(() => {
+    fetchDownline();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [downlinePage, levelFilter, downlineSearch]);
+
+  const fetchDownline = async () => {
+    try {
+      setDownlineLoading(true);
+      const response = await userAPI.getDownlineTeam(downlinePage, {
+        level: levelFilter || undefined,
+        search: downlineSearch || undefined
+      });
+      setDownline(response.data.members);
+      setDownlineTotal(response.data.total || 0);
+      setDownlineTotalPages(response.data.totalPages || 1);
+      setLevelCounts(response.data.levelCounts || []);
+    } catch (error) {
+      toast.error('Failed to load network');
+    } finally {
+      setDownlineLoading(false);
+    }
+  };
+
+  const handleDownlineSearch = (e) => {
+    e.preventDefault();
+    setDownlinePage(1);
+    setDownlineSearch(searchInput.trim());
+  };
+
+  const clearDownlineSearch = () => {
+    setSearchInput('');
+    setDownlinePage(1);
+    setDownlineSearch('');
+  };
 
   const fetchSummary = async () => {
     try {
@@ -98,7 +145,8 @@ const Referrals = () => {
 
   const activeReferrals = summary.active_referrals;
   const totalDirectBusiness = summary.total_direct_business;
-  const totalBonusReceived = summary.total_bonus_received;
+  const totalTeamBusiness = summary.total_team_business || 0;
+  const totalTeamIncome = summary.total_team_income || 0;
 
   if (loading) {
     return (
@@ -137,7 +185,7 @@ const Referrals = () => {
             <div className="referral-icon">🔗</div>
             <div className="referral-info">
               <h3>Share Your Referral Link</h3>
-              <p>Earn daily incentive when your referrals purchase a package!</p>
+              <p>Earn Team Income when your referrals purchase a product!</p>
             </div>
           </div>
           <div className="referral-link-box">
@@ -167,7 +215,7 @@ const Referrals = () => {
 
         {/* Stats */}
         <div className="stats-grid">
-          <div className="stat-card">
+          <div className="stat-card teal">
             <div className="stat-icon">👥</div>
             <div className="stat-label">Total Referrals</div>
             <div className="stat-value">{summary.total_referrals}</div>
@@ -177,19 +225,25 @@ const Referrals = () => {
             <div className="stat-icon">✅</div>
             <div className="stat-label">Active Referrals</div>
             <div className="stat-value">{activeReferrals}</div>
-            <div className="stat-subtext">Earning you incentive</div>
+            <div className="stat-subtext">With active package</div>
           </div>
           <div className="stat-card primary">
             <div className="stat-icon">💼</div>
             <div className="stat-label">Direct Business</div>
             <div className="stat-value">₹{totalDirectBusiness.toLocaleString()}</div>
-            <div className="stat-subtext">Total purchases by team</div>
+            <div className="stat-subtext">Purchases by direct referrals</div>
           </div>
-          <div className="stat-card bonus">
-            <div className="stat-icon">💰</div>
-            <div className="stat-label">Bonus Received</div>
-            <div className="stat-value">₹{totalBonusReceived.toLocaleString()}</div>
-            <div className="stat-subtext">Earnings from referrals</div>
+          <div className="stat-card team-business">
+            <div className="stat-icon">🌐</div>
+            <div className="stat-label">Team Business</div>
+            <div className="stat-value">₹{totalTeamBusiness.toLocaleString()}</div>
+            <div className="stat-subtext">Total purchases across all 10 levels</div>
+          </div>
+          <div className="stat-card gold">
+            <div className="stat-icon">👥</div>
+            <div className="stat-label">Team Income</div>
+            <div className="stat-value">₹{Number(totalTeamIncome).toLocaleString()}</div>
+            <div className="stat-subtext">Earned from downline</div>
           </div>
         </div>
 
@@ -210,14 +264,14 @@ const Referrals = () => {
               <div className="step-number">2</div>
               <div className="step-content">
                 <h4>They Register & Purchase</h4>
-                <p>When they sign up and buy a package, they become your referral</p>
+                <p>When they sign up and buy a product, they become your referral</p>
               </div>
             </div>
             <div className="step">
               <div className="step-number">3</div>
               <div className="step-content">
-                <h4>Earn Daily Incentive</h4>
-                <p>Earn daily incentive for each active referral</p>
+                <h4>Earn Team Income</h4>
+                <p>Earn Team Income for each active referral who purchases — 10 levels per rank</p>
               </div>
             </div>
           </div>
@@ -239,7 +293,7 @@ const Referrals = () => {
                     <th>Name</th>
                     <th>Contact</th>
                     <th>Direct Business</th>
-                    <th>Bonus Received</th>
+                    <th>Qualified</th>
                     <th>Status</th>
                     <th>Joined</th>
                     <th>Actions</th>
@@ -266,7 +320,9 @@ const Referrals = () => {
                         <span className="business-amount">₹{(ref.direct_business || 0).toLocaleString()}</span>
                       </td>
                       <td>
-                        <span className="bonus-amount">₹{(ref.bonus_received || 0).toLocaleString()}</span>
+                        <span className={`badge badge-${ref.has_active_package ? 'success' : 'neutral'}`}>
+                          {ref.has_active_package ? '✓ Qualified' : 'Not Qualified'}
+                        </span>
                       </td>
                       <td>
                         <span className={`badge badge-${ref.has_active_package ? 'success' : 'warning'}`}>
@@ -301,13 +357,122 @@ const Referrals = () => {
             <EmptyState
               icon="👥"
               title="No referrals yet"
-              description="Share your referral link with friends and family. When they register and purchase a package, they'll appear here."
+              description="Share your referral link with friends and family. When they register and purchase a product, they'll appear here."
               action={{
                 label: 'Copy Referral Link',
                 onClick: copyToClipboard,
                 variant: 'primary',
                 icon: '📋 '
               }}
+            />
+          )}
+        </div>
+
+        {/* 10-Level Network */}
+        <div className="card">
+          <div className="card-header">
+            <h3 className="card-title">🌐 My Network (10 Levels)</h3>
+            {downlineTotal > 0 && (
+              <span className="badge badge-neutral">{downlineTotal} Members</span>
+            )}
+          </div>
+
+          {/* Level count chips */}
+          {levelCounts.length > 0 && (
+            <div className="level-chips">
+              <button
+                type="button"
+                className={`level-chip ${levelFilter === '' ? 'active' : ''}`}
+                onClick={() => { setLevelFilter(''); setDownlinePage(1); }}
+              >
+                All Levels
+              </button>
+              {levelCounts.map((lc) => (
+                <button
+                  type="button"
+                  key={lc.level}
+                  className={`level-chip ${levelFilter === String(lc.level) ? 'active' : ''}`}
+                  onClick={() => { setLevelFilter(String(lc.level)); setDownlinePage(1); }}
+                >
+                  L{lc.level} <span className="level-chip-count">{lc.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Search */}
+          <form onSubmit={handleDownlineSearch} className="filter-form">
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Search by name, email, mobile, or referral code..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+            <button type="submit" className="btn btn-primary">Search</button>
+            {downlineSearch && (
+              <button type="button" className="btn btn-ghost" onClick={clearDownlineSearch}>Clear</button>
+            )}
+          </form>
+
+          {downlineLoading ? (
+            <LoadingSkeleton variant="card" />
+          ) : downline.length > 0 ? (
+            <>
+              <div className="table-container">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Level</th>
+                      <th>Name</th>
+                      <th>Contact</th>
+                      <th>Referral Code</th>
+                      <th>Rank</th>
+                      <th>Status</th>
+                      <th>Joined</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {downline.map((m) => (
+                      <tr key={m.id}>
+                        <td><span className="badge badge-info">L{m.level}</span></td>
+                        <td>
+                          <div className="member-info">
+                            <div className="member-avatar">{m.name?.charAt(0).toUpperCase()}</div>
+                            <span className="member-name">{m.name}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="contact-info">
+                            <span className="contact-email">{m.email}</span>
+                            <span className="contact-mobile">{m.mobile}</span>
+                          </div>
+                        </td>
+                        <td className="font-mono">{m.referral_code}</td>
+                        <td>{m.rank_name ? <span className={rankBadgeClass(m.rank_name)}>🏆 {m.rank_name}</span> : <span className="text-muted">—</span>}</td>
+                        <td>
+                          <span className={`badge badge-${m.has_active_package ? 'success' : 'warning'}`}>
+                            {m.has_active_package ? '✓ Active' : '⏳ Inactive'}
+                          </span>
+                        </td>
+                        <td className="text-muted">{new Date(m.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination
+                page={downlinePage}
+                totalPages={downlineTotalPages}
+                total={downlineTotal}
+                onChange={setDownlinePage}
+              />
+            </>
+          ) : (
+            <EmptyState
+              icon="🌐"
+              title={downlineSearch || levelFilter ? 'No matches found' : 'No network yet'}
+              description={downlineSearch || levelFilter ? 'Try a different search term or level.' : 'As your referrals build their own teams, your full 10-level network will appear here.'}
             />
           )}
         </div>
@@ -453,33 +618,89 @@ const Referrals = () => {
           margin-top: 0.25rem;
         }
 
-        .stat-card.primary {
-          background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        /* Colorful brand-gradient stat cards (white text) */
+        .stat-card.teal,
+        .stat-card.success,
+        .stat-card.primary,
+        .stat-card.team-business,
+        .stat-card.gold {
           color: white;
+          border: none;
         }
 
+        /* Soft decorative circle, like the wallet cards */
+        .stat-card.teal::after,
+        .stat-card.success::after,
+        .stat-card.primary::after,
+        .stat-card.team-business::after,
+        .stat-card.gold::after {
+          content: '';
+          position: absolute;
+          right: -18px;
+          bottom: -18px;
+          width: 80px;
+          height: 80px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.12);
+          pointer-events: none;
+        }
+
+        .stat-card.teal {
+          background: linear-gradient(135deg, #073C39 0%, #0B4541 100%);
+          box-shadow: 0 4px 20px rgba(7, 60, 57, 0.35);
+        }
+
+        .stat-card.success {
+          background: linear-gradient(135deg, #5D8172 0%, #40584E 100%);
+          box-shadow: 0 4px 20px rgba(93, 129, 114, 0.35);
+        }
+
+        .stat-card.primary {
+          background: linear-gradient(135deg, #CFAA57 0%, #B18B36 100%);
+          box-shadow: 0 4px 20px rgba(177, 139, 54, 0.35);
+        }
+
+        .stat-card.team-business {
+          background: linear-gradient(135deg, #073C39 0%, #5D8172 100%);
+          box-shadow: 0 4px 20px rgba(7, 60, 57, 0.3);
+        }
+
+        .stat-card.gold {
+          background: linear-gradient(135deg, #B18B36 0%, #996F19 100%);
+          box-shadow: 0 4px 20px rgba(153, 111, 25, 0.35);
+        }
+
+        .stat-card.teal .stat-icon,
+        .stat-card.success .stat-icon,
+        .stat-card.primary .stat-icon,
+        .stat-card.team-business .stat-icon,
+        .stat-card.gold .stat-icon {
+          background: rgba(255, 255, 255, 0.18);
+        }
+
+        .stat-card.teal .stat-value,
+        .stat-card.teal .stat-label,
+        .stat-card.teal .stat-subtext,
+        .stat-card.success .stat-value,
+        .stat-card.success .stat-label,
+        .stat-card.success .stat-subtext,
         .stat-card.primary .stat-value,
         .stat-card.primary .stat-label,
-        .stat-card.primary .stat-subtext {
+        .stat-card.primary .stat-subtext,
+        .stat-card.team-business .stat-value,
+        .stat-card.team-business .stat-label,
+        .stat-card.team-business .stat-subtext,
+        .stat-card.gold .stat-value,
+        .stat-card.gold .stat-label,
+        .stat-card.gold .stat-subtext {
           color: white;
         }
 
-        .stat-card.primary .stat-subtext {
-          opacity: 0.8;
-        }
-
-        .stat-card.bonus {
-          background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-          color: white;
-        }
-
-        .stat-card.bonus .stat-value,
-        .stat-card.bonus .stat-label,
-        .stat-card.bonus .stat-subtext {
-          color: white;
-        }
-
-        .stat-card.bonus .stat-subtext {
+        .stat-card.teal .stat-subtext,
+        .stat-card.success .stat-subtext,
+        .stat-card.primary .stat-subtext,
+        .stat-card.team-business .stat-subtext,
+        .stat-card.gold .stat-subtext {
           opacity: 0.8;
         }
 
@@ -643,8 +864,58 @@ const Referrals = () => {
 
         .font-medium { font-weight: 500; }
         .font-semibold { font-weight: 600; }
+        .font-mono { font-family: monospace; }
         .text-primary { color: var(--primary-600); }
         .text-muted { color: var(--gray-500); }
+
+        .level-chips {
+          display: flex;
+          gap: 0.5rem;
+          flex-wrap: wrap;
+          padding: 0 0 1rem;
+        }
+
+        .level-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.375rem;
+          padding: 0.4rem 0.75rem;
+          border: 1px solid var(--gray-200);
+          border-radius: var(--radius-lg);
+          background: white;
+          color: var(--gray-600);
+          font-size: 0.8125rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+
+        .level-chip:hover {
+          border-color: var(--primary-300);
+        }
+
+        .level-chip.active {
+          background: var(--primary-600);
+          border-color: var(--primary-600);
+          color: white;
+        }
+
+        .level-chip-count {
+          font-size: 0.72rem;
+          opacity: 0.8;
+        }
+
+        .filter-form {
+          display: flex;
+          gap: 0.75rem;
+          flex-wrap: wrap;
+          padding-bottom: 1rem;
+        }
+
+        .filter-form .form-input {
+          flex: 1;
+          min-width: 200px;
+        }
 
         @media (max-width: 768px) {
           .table-container {

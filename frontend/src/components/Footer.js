@@ -43,7 +43,7 @@ const Footer = () => {
                 )}
               </Link>
               <p className="footer-tagline">
-                {siteTagline || 'Premium quality bedsheets with a unique Direct Referral Salary Plan.'}
+                {siteTagline || 'Premium quality products with a rank & level-income plan.'}
               </p>
               {hasSocialLinks && (
                 <div className="social-links">
@@ -274,7 +274,7 @@ const Footer = () => {
         }
 
         .social-link:hover {
-          background: #3b82f6;
+          background: #5D8172;
           color: #fff;
           transform: translateY(-3px);
         }
@@ -330,7 +330,7 @@ const Footer = () => {
         .footer-contact svg {
           flex-shrink: 0;
           margin-top: 2px;
-          color: #3b82f6;
+          color: #5D8172;
         }
 
         .footer-contact span {
@@ -362,7 +362,7 @@ const Footer = () => {
         }
 
         .trust-badge svg {
-          color: #3b82f6;
+          color: #5D8172;
         }
 
         /* Bottom */

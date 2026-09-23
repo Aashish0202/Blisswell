@@ -253,7 +253,7 @@ const PrivacyPolicy = () => {
         .glow-1 {
           width: 400px;
           height: 400px;
-          background: rgba(37, 99, 235, 0.08);
+          background: rgba(7, 60, 57, 0.08);
           top: -50px;
           right: -50px;
         }
@@ -284,18 +284,18 @@ const PrivacyPolicy = () => {
           align-items: center;
           gap: 0.5rem;
           padding: 0.5rem 1rem;
-          background: rgba(37, 99, 235, 0.08);
+          background: rgba(7, 60, 57, 0.08);
           border-radius: 100px;
           margin-bottom: 1.5rem;
           font-size: 0.8125rem;
           font-weight: 500;
-          color: #2563eb;
+          color: #073C39;
         }
 
         .eyebrow-dot {
           width: 6px;
           height: 6px;
-          background: #2563eb;
+          background: #073C39;
           border-radius: 50%;
         }
 
@@ -316,7 +316,7 @@ const PrivacyPolicy = () => {
           display: block;
           font-size: clamp(2.5rem, 5vw, 3.5rem);
           font-weight: 500;
-          background: linear-gradient(135deg, #2563eb, #059669);
+          background: linear-gradient(135deg, #073C39, #5D8172);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
@@ -433,10 +433,10 @@ const PrivacyPolicy = () => {
 
         .highlight-box {
           padding: 1rem 1.25rem;
-          background: #dbeafe;
-          border-left: 4px solid #2563eb;
+          background: #E3EDE4;
+          border-left: 4px solid #073C39;
           border-radius: 0 8px 8px 0;
-          color: #1e40af !important;
+          color: #073C39 !important;
           margin: 1rem 0;
         }
 
@@ -459,7 +459,7 @@ const PrivacyPolicy = () => {
 
         .contact-item svg {
           flex-shrink: 0;
-          color: #2563eb;
+          color: #073C39;
           margin-top: 0.125rem;
         }
 

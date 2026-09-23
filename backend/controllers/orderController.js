@@ -3,12 +3,28 @@ const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
-const SalaryCycle = require('../models/SalaryCycle');
+
+// Resolve the design selection for a purchase. Returns the normalized
+// design name (null for products without designs) or an error message.
+// Products WITH designs require an explicit, matching design_name.
+function resolveDesign(product, designName) {
+  if (!designName) {
+    if ((product.designs || []).length > 0) {
+      return { error: 'Please select a design before purchasing' };
+    }
+    return { name: null };
+  }
+  const match = Product.findDesign(product, String(designName).trim());
+  if (!match || !match.design) {
+    return { error: `Invalid design selection for ${product.name}` };
+  }
+  return { name: match.design.name };
+}
 const WalletTransaction = require('../models/WalletTransaction');
-const Settings = require('../models/Settings');
-const { resumePausedCycles } = require('./salaryController');
+const teamIncomeService = require('../services/teamIncomeService');
 const emailService = require('../utils/emailService');
-const { generateInvoiceNumber } = require('../utils/helpers');
+const { allocateInvoiceNumber } = require('../utils/helpers');
+const { getUpgradeInfo } = require('./userController');
 const crypto = require('crypto');
 const razorpay = require('../config/razorpay');
 
@@ -38,6 +54,12 @@ exports.purchaseProduct = async (req, res) => {
 
     console.log(`Product: ${product.name}, Price: ${product.price}`);
 
+    // Validate design selection (required for products that have designs)
+    const design = resolveDesign(product, req.body.design_name);
+    if (design.error) {
+      return res.status(400).json({ message: design.error });
+    }
+
     // Start transaction
     await connection.beginTransaction();
 
@@ -55,13 +77,15 @@ exports.purchaseProduct = async (req, res) => {
 
     console.log(`User: ${user.email}, PAN: ${user.pan_status}, Has package: ${user.has_active_package}`);
 
-    // Check if user already has active package
+    // One-time purchase rule: a user buys a package once. Any higher rank is
+    // upgraded exclusively through the auto-repurchase engine (repurchase
+    // wallet), never by a second manual purchase.
     if (user.has_active_package) {
-      const repurchaseEnabled = await Settings.get('repurchase_enabled');
-      if (repurchaseEnabled !== 'true') {
-        await connection.rollback();
-        return res.status(400).json({ message: 'You already have an active package' });
-      }
+      await connection.rollback();
+      return res.status(400).json({
+        message: 'One-time purchase only: you already own a package. Higher ranks are upgraded automatically from your Repurchase Wallet.',
+        error: 'ALREADY_PURCHASED'
+      });
     }
 
     // Get wallet with lock
@@ -102,17 +126,19 @@ exports.purchaseProduct = async (req, res) => {
 
     console.log('Balance deducted successfully');
 
-    // Generate invoice number with new format: BSW + sequential + userId
-    const invoiceNumber = await generateInvoiceNumber(connection, userId); //here
+    // Allocate invoice number — wallet payment settles in this same
+    // transaction, so the invoice is issued only on confirmed payment.
+    const invoiceNumber = await allocateInvoiceNumber(connection);
 
-    // Create order (wallet purchases settle instantly — balance is already
-    // deducted and the package activated in this transaction — so the order is
-    // 'delivered', not 'processing'. 'processing' is reserved for gateway
-    // payments that are still pending verification.)
+    // Create order. Payment is settled instantly (wallet balance deducted and
+    // the package activated in this transaction), but the delivery status
+    // starts as 'pending' — admin sets shipped/delivered from the admin panel
+    // as the product actually ships. 'processing' is reserved for gateway
+    // payments that are still pending verification.
     const [orderResult] = await connection.execute(
-      `INSERT INTO orders (user_id, product_id, amount, payment_type, status, order_number)
-       VALUES (?, ?, ?, 'wallet', 'delivered', ?)`,
-      [userId, product.id, product.price, invoiceNumber] //here
+      `INSERT INTO orders (user_id, product_id, design_name, amount, payment_type, status, order_number)
+       VALUES (?, ?, ?, ?, 'wallet', 'pending', ?)`,
+      [userId, product.id, design.name, product.price, invoiceNumber] //here
     );
     const orderId = orderResult.insertId;
 
@@ -127,63 +153,29 @@ exports.purchaseProduct = async (req, res) => {
 
     console.log('Transaction record created');
 
-    // Set user active package
+    // Set user active package + rank (initial purchase defines the rank)
     await connection.execute(
-      'UPDATE users SET has_active_package = TRUE, updated_at = NOW() WHERE id = ?',
-      [userId]
+      'UPDATE users SET has_active_package = TRUE, rank_name = ?, current_product_id = ?, updated_at = NOW() WHERE id = ?',
+      [product.rank_name, product.id, userId]
     );
 
     console.log('User package activated');
 
-    // Create salary cycle for referrer
-    if (user.referred_by) {
-      try {
-        const wasInactive = !user.has_active_package;
-
-        // Get referrer
-        const [referrerRows] = await connection.execute(
-          'SELECT * FROM users WHERE id = ?',
-          [user.referred_by]
-        );
-        const referrer = referrerRows[0];
-
-        if (referrer && referrer.has_active_package) {
-          // Check if a salary cycle already exists for this referral
-          const [existingCycles] = await connection.execute(
-            'SELECT id FROM salary_cycles WHERE referral_id = ?',
-            [userId]
-          );
-
-          if (existingCycles.length === 0) {
-            // Use product-specific daily incentive settings
-            const productDailyAmount = product.daily_amount || product.salary_amount || 100;
-            const productDays = product.days || product.salary_duration || 12;
-            const startDate = new Date();
-
-            await connection.execute(
-              `INSERT INTO salary_cycles (sponsor_id, referral_id, start_date, daily_amount, days, days_paid, status)
-               VALUES (?, ?, ?, ?, ?, 0, 'active')`,
-              [user.referred_by, userId, startDate, productDailyAmount, productDays]
-            );
-
-            console.log('Daily incentive cycle created for referrer');
-          }
-        }
-
-        // Resume paused cycles if user was previously inactive
-        if (wasInactive) {
-          await resumePausedCycles(userId);
-        }
-      } catch (cycleError) {
-        console.error('Error creating salary cycle:', cycleError);
-        // Don't fail the purchase for this
-      }
-    }
+    // Distribute Team Income to qualified upline. Runs inside the purchase
+    // transaction so the purchase and its income effects commit atomically.
+    await teamIncomeService.distributeForPurchase(connection, {
+      purchaserId: userId,
+      orderId,
+      product
+    });
 
     // Commit transaction
     await connection.commit();
 
     console.log('Purchase completed successfully');
+
+    // Next auto-upgrade info for the post-purchase popup
+    const nextUpgrade = await getUpgradeInfo(userId);
 
     // Send purchase confirmation email (don't await to not block response)
     emailService.sendPurchaseEmail(
@@ -197,7 +189,8 @@ exports.purchaseProduct = async (req, res) => {
       message: 'Purchase successful!',
       order_id: orderId,
       product_name: product.name,
-      amount: product.price
+      amount: product.price,
+      nextUpgrade
     });
 
   } catch (error) {
@@ -300,13 +293,21 @@ exports.createPaymentOrder = async (req, res) => {
       return res.status(400).json({ message: 'Product is not available for purchase' });
     }
 
-    // Check if user already has active package
+    // Validate design selection (required for products that have designs) —
+    // stored on the 'processing' order now and carried through verification.
+    const design = resolveDesign(product, req.body.design_name);
+    if (design.error) {
+      return res.status(400).json({ message: design.error });
+    }
+
+    // One-time purchase rule (see purchaseProduct): second manual buys are
+    // blocked — upgrades come from the auto-repurchase engine only.
     const user = await User.findById(userId);
     if (user.has_active_package) {
-      const repurchaseEnabled = await Settings.get('repurchase_enabled');
-      if (repurchaseEnabled !== 'true') {
-        return res.status(400).json({ message: 'You already have an active package' });
-      }
+      return res.status(400).json({
+        message: 'One-time purchase only: you already own a package. Higher ranks are upgraded automatically from your Repurchase Wallet.',
+        error: 'ALREADY_PURCHASED'
+      });
     }
 
     const amount = parseFloat(product.price);
@@ -326,14 +327,14 @@ exports.createPaymentOrder = async (req, res) => {
 
     await connection.beginTransaction();
 
-    // Generate invoice number
-    const invoiceNumber = await generateInvoiceNumber(connection, userId);
-
-    // Create order with 'processing' status (payment in progress)
+    // Create order with 'processing' status (payment in progress).
+    // NO invoice number yet — invoices are allocated only in verifyAndPurchase
+    // when the payment is actually confirmed, so failed/abandoned payments
+    // never consume a sequential number.
     const [orderResult] = await connection.execute(
-      `INSERT INTO orders (user_id, product_id, amount, payment_type, status, order_number)
-       VALUES (?, ?, ?, 'razorpay', 'processing', ?)`,
-      [userId, product.id, product.price, invoiceNumber]
+      `INSERT INTO orders (user_id, product_id, design_name, amount, payment_type, status, order_number)
+       VALUES (?, ?, ?, ?, 'razorpay', 'processing', NULL)`,
+      [userId, product.id, design.name, product.price]
     );
     const orderId = orderResult.insertId;
 
@@ -349,7 +350,6 @@ exports.createPaymentOrder = async (req, res) => {
     res.json({
       order_id: razorpayOrder.id,
       internal_order_id: orderId,
-      order_number: invoiceNumber,
       amount: razorpayOrder.amount,
       currency: razorpayOrder.currency,
       key_id: process.env.RAZORPAY_KEY_ID,
@@ -377,7 +377,8 @@ exports.verifyAndPurchase = async (req, res) => {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
-      product_id
+      product_id,
+      design_name
     } = req.body;
 
     const userId = req.user.id;
@@ -413,18 +414,19 @@ exports.verifyAndPurchase = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Check if user already has active package
+    // One-time purchase rule (see purchaseProduct): blocks a second manual
+    // buy even if a payment somehow reaches verification.
     if (user.has_active_package) {
-      const repurchaseEnabled = await Settings.get('repurchase_enabled');
-      if (repurchaseEnabled !== 'true') {
-        await connection.rollback();
-        return res.status(400).json({ message: 'You already have an active package' });
-      }
+      await connection.rollback();
+      return res.status(400).json({
+        message: 'One-time purchase only: you already own a package. Higher ranks are upgraded automatically from your Repurchase Wallet.',
+        error: 'ALREADY_PURCHASED'
+      });
     }
 
     // Find existing order from wallet_transactions using razorpay_order_id
     const [existingOrderRows] = await connection.execute(
-      `SELECT wt.order_id, o.order_number
+      `SELECT wt.order_id, o.design_name
        FROM wallet_transactions wt
        JOIN orders o ON o.id = wt.order_id
        WHERE wt.payment_id = ? AND wt.user_id = ? AND wt.status = 'pending'`,
@@ -434,14 +436,26 @@ exports.verifyAndPurchase = async (req, res) => {
     let orderId;
     let invoiceNumber;
 
+    // Design was already validated and stored on the 'processing' order in
+    // createPaymentOrder. Only require the client to resend it for the
+    // fallback path where no prior order row exists.
+    const effectiveDesignName = design_name || (existingOrderRows[0] && existingOrderRows[0].design_name) || null;
+    const design = resolveDesign(product, effectiveDesignName);
+    if (design.error) {
+      await connection.rollback();
+      return res.status(400).json({ message: design.error });
+    }
+
     if (existingOrderRows.length > 0) {
-      // Update existing order to 'delivered' status
+      // Payment verified — allocate the sequential invoice number NOW (the
+      // only point an invoice is ever issued) and move the order to 'pending'
+      // (awaiting shipment; admin marks shipped/delivered from the admin panel)
       orderId = existingOrderRows[0].order_id;
-      invoiceNumber = existingOrderRows[0].order_number;
+      invoiceNumber = await allocateInvoiceNumber(connection);
 
       await connection.execute(
-        `UPDATE orders SET status = 'delivered', updated_at = NOW() WHERE id = ?`,
-        [orderId]
+        `UPDATE orders SET status = 'pending', order_number = ?, updated_at = NOW() WHERE id = ?`,
+        [invoiceNumber, orderId]
       );
 
       // Update wallet transaction to completed
@@ -455,17 +469,17 @@ exports.verifyAndPurchase = async (req, res) => {
         [razorpay_payment_id, `Purchase: ${product.name}`, -product.price, orderId, userId]
       );
 
-      console.log(`Updated existing order ${orderId} to delivered status`);
+      console.log(`Updated existing order ${orderId} to pending status (payment verified)`);
     } else {
       // Fallback: Create new order if no existing order found (shouldn't normally happen)
       console.warn(`No existing order found for razorpay_order_id: ${razorpay_order_id}, creating new order`);
 
-      invoiceNumber = await generateInvoiceNumber(connection, userId);
+      invoiceNumber = await allocateInvoiceNumber(connection);
 
       const [orderResult] = await connection.execute(
-        `INSERT INTO orders (user_id, product_id, amount, payment_type, status, order_number)
-         VALUES (?, ?, ?, 'razorpay', 'delivered', ?)`,
-        [userId, product.id, product.price, invoiceNumber]
+        `INSERT INTO orders (user_id, product_id, design_name, amount, payment_type, status, order_number)
+         VALUES (?, ?, ?, ?, 'razorpay', 'pending', ?)`,
+        [userId, product.id, design.name, product.price, invoiceNumber]
       );
       orderId = orderResult.insertId;
 
@@ -477,49 +491,23 @@ exports.verifyAndPurchase = async (req, res) => {
       );
     }
 
-    // Set user active package
+    // Set user active package + rank (initial purchase defines the rank)
     await connection.execute(
-      'UPDATE users SET has_active_package = TRUE, updated_at = NOW() WHERE id = ?',
-      [userId]
+      'UPDATE users SET has_active_package = TRUE, rank_name = ?, current_product_id = ?, updated_at = NOW() WHERE id = ?',
+      [product.rank_name, product.id, userId]
     );
 
-    // Create salary cycle for referrer
-    if (user.referred_by) {
-      try {
-        // Get referrer
-        const [referrerRows] = await connection.execute(
-          'SELECT * FROM users WHERE id = ?',
-          [user.referred_by]
-        );
-        const referrer = referrerRows[0];
-
-        if (referrer && referrer.has_active_package) {
-          // Check if a salary cycle already exists for this referral
-          const [existingCycles] = await connection.execute(
-            'SELECT id FROM salary_cycles WHERE referral_id = ?',
-            [userId]
-          );
-
-          if (existingCycles.length === 0) {
-            // Use product-specific daily incentive settings
-            const productDailyAmount = product.daily_amount || product.salary_amount || 100;
-            const productDays = product.days || product.salary_duration || 12;
-            const startDate = new Date();
-
-            await connection.execute(
-              `INSERT INTO salary_cycles (sponsor_id, referral_id, start_date, daily_amount, days, days_paid, status)
-               VALUES (?, ?, ?, ?, ?, 0, 'active')`,
-              [user.referred_by, userId, startDate, productDailyAmount, productDays]
-            );
-          }
-        }
-      } catch (cycleError) {
-        console.error('Error creating salary cycle:', cycleError);
-        // Don't fail the purchase for this
-      }
-    }
+    // Team Income distribution (qualified upline, per the purchaser's rank table).
+    await teamIncomeService.distributeForPurchase(connection, {
+      purchaserId: userId,
+      orderId,
+      product
+    });
 
     await connection.commit();
+
+    // Next auto-upgrade info for the post-purchase popup
+    const nextUpgrade = await getUpgradeInfo(userId);
 
     // Send purchase confirmation email
     emailService.sendPurchaseEmail(
@@ -534,7 +522,8 @@ exports.verifyAndPurchase = async (req, res) => {
       order_id: orderId,
       order_number: invoiceNumber,
       product_name: product.name,
-      amount: product.price
+      amount: product.price,
+      nextUpgrade
     });
 
   } catch (error) {
@@ -576,12 +565,10 @@ exports.recordCancelledPayment = async (req, res) => {
     );
 
     let orderId;
-    let invoiceNumber;
 
     if (existingOrderRows.length > 0) {
       // Update existing order to 'failed' status
       orderId = existingOrderRows[0].order_id;
-      invoiceNumber = existingOrderRows[0].order_number;
 
       await connection.execute(
         `UPDATE orders SET status = 'failed', updated_at = NOW() WHERE id = ?`,
@@ -599,15 +586,14 @@ exports.recordCancelledPayment = async (req, res) => {
 
       console.log(`Updated existing order ${orderId} to failed status (cancelled)`);
     } else {
-      // Fallback: Create new order if no existing order found
+      // Fallback: Create new order if no existing order found.
+      // No invoice number — a cancelled payment is never invoiced.
       console.warn(`No existing order found for cancelled payment, razorpay_order_id: ${razorpay_order_id}`);
-
-      invoiceNumber = await generateInvoiceNumber(connection, userId);
 
       const [orderResult] = await connection.execute(
         `INSERT INTO orders (user_id, product_id, amount, payment_type, status, order_number)
-         VALUES (?, ?, ?, 'razorpay', 'failed', ?)`,
-        [userId, product.id, product.price, invoiceNumber]
+         VALUES (?, ?, ?, 'razorpay', 'failed', NULL)`,
+        [userId, product.id, product.price]
       );
       orderId = orderResult.insertId;
 
@@ -624,8 +610,7 @@ exports.recordCancelledPayment = async (req, res) => {
     res.json({
       success: true,
       message: 'Cancelled payment recorded',
-      order_id: orderId,
-      order_number: invoiceNumber
+      order_id: orderId
     });
 
   } catch (error) {
@@ -667,13 +652,11 @@ exports.recordFailedPayment = async (req, res) => {
     );
 
     let orderId;
-    let invoiceNumber;
     const errorDesc = error_description || error_code || 'Payment failed';
 
     if (existingOrderRows.length > 0) {
       // Update existing order to 'failed' status
       orderId = existingOrderRows[0].order_id;
-      invoiceNumber = existingOrderRows[0].order_number;
 
       await connection.execute(
         `UPDATE orders SET status = 'failed', updated_at = NOW() WHERE id = ?`,
@@ -691,15 +674,14 @@ exports.recordFailedPayment = async (req, res) => {
 
       console.log(`Updated existing order ${orderId} to failed status`);
     } else {
-      // Fallback: Create new order if no existing order found
+      // Fallback: Create new order if no existing order found.
+      // No invoice number — a failed payment is never invoiced.
       console.warn(`No existing order found for failed payment, razorpay_order_id: ${razorpay_order_id}`);
-
-      invoiceNumber = await generateInvoiceNumber(connection, userId);
 
       const [orderResult] = await connection.execute(
         `INSERT INTO orders (user_id, product_id, amount, payment_type, status, order_number)
-         VALUES (?, ?, ?, 'razorpay', 'failed', ?)`,
-        [userId, product.id, product.price, invoiceNumber]
+         VALUES (?, ?, ?, 'razorpay', 'failed', NULL)`,
+        [userId, product.id, product.price]
       );
       orderId = orderResult.insertId;
 
@@ -716,8 +698,7 @@ exports.recordFailedPayment = async (req, res) => {
     res.json({
       success: true,
       message: 'Failed payment recorded',
-      order_id: orderId,
-      order_number: invoiceNumber
+      order_id: orderId
     });
 
   } catch (error) {

@@ -97,7 +97,7 @@ const ProgressTracker = ({
           background: var(--primary-600);
           border-color: var(--primary-600);
           color: white;
-          box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
+          box-shadow: 0 0 0 4px rgba(7, 60, 57, 0.2);
         }
 
         .progress-step-item.upcoming .progress-step-circle {

@@ -886,7 +886,7 @@ const IdCard = () => {
 
         .mobile-status.active {
           background: rgba(34, 197, 94, 0.15);
-          color: #059669;
+          color: #5D8172;
         }
 
         .mobile-status.inactive {

@@ -92,6 +92,40 @@ const Wallet = {
       [userId]
     );
     return rows[0]?.earnings_balance || 0;
+  },
+
+  // ---- Repurchase (upgrade) wallet ----
+  // Funded by the 20% share of processed withdrawals. Spent exclusively by
+  // the auto-repurchase engine when the user upgrades to the next rank.
+
+  // Credit repurchase wallet (withdrawal processing)
+  async addRepurchase(userId, amount, connection = pool) {
+    const conn = connection;
+    const [result] = await conn.execute(
+      'UPDATE wallets SET repurchase_balance = repurchase_balance + ?, updated_at = NOW() WHERE user_id = ?',
+      [amount, userId]
+    );
+    return result.affectedRows > 0;
+  },
+
+  // Debit repurchase wallet (auto repurchase). Guarded so it can't go negative.
+  async debitRepurchase(userId, amount, connection = pool) {
+    const conn = connection;
+    const [result] = await conn.execute(
+      'UPDATE wallets SET repurchase_balance = repurchase_balance - ?, updated_at = NOW() WHERE user_id = ? AND repurchase_balance >= ?',
+      [amount, userId, amount]
+    );
+    return result.affectedRows > 0;
+  },
+
+  // Get repurchase balance
+  async getRepurchase(userId, connection = pool) {
+    const conn = connection;
+    const [rows] = await conn.execute(
+      'SELECT repurchase_balance FROM wallets WHERE user_id = ?',
+      [userId]
+    );
+    return rows[0]?.repurchase_balance || 0;
   }
 };
 

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { useSiteSettings } from './SiteSettingsProvider';
 import { logout } from '../redux/slices/authSlice';
+import { REPORT_TABS } from '../pages/admin/reportTypes';
 
 const DashboardLayout = ({ children, isAdmin = false }) => {
   const { user } = useSelector((state) => state.auth);
@@ -11,7 +12,15 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [reportsOpen, setReportsOpen] = useState(location.pathname.startsWith('/admin/reports'));
   const { siteName, siteLogo, siteTagline } = useSiteSettings();
+
+  // Auto-open the Reports dropdown while on any reports page
+  useEffect(() => {
+    if (location.pathname.startsWith('/admin/reports')) {
+      setReportsOpen(true);
+    }
+  }, [location.pathname]);
 
   // Close sidebar on route change (mobile)
   useEffect(() => {
@@ -40,7 +49,8 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
     { path: '/wallet', label: 'Wallet', icon: 'wallet' },
     { path: '/orders', label: 'Shop', icon: 'shop' },
     { path: '/referrals', label: 'Team', icon: 'team' },
-    { path: '/salary', label: 'Incentive', icon: 'income' },
+    { path: '/earnings', label: 'Earnings', icon: 'income' },
+    { path: '/withdrawal', label: 'Withdrawal', icon: 'withdrawal' },
     { path: '/id-card', label: 'ID Card', icon: 'idcard' },
     { path: '/support', label: 'Support', icon: 'support' },
     { path: '/profile', label: 'Profile', icon: 'profile' },
@@ -52,11 +62,10 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
     { path: '/admin/orders', label: 'Orders', icon: 'orders' },
     { path: '/admin/products', label: 'Products', icon: 'products' },
     { path: '/admin/gallery', label: 'Gallery', icon: 'gallery' },
-    { path: '/admin/salary', label: 'Incentive', icon: 'salary' },
-    { path: '/admin/bonus', label: 'Bonus', icon: 'bonus' },
+    { path: '/admin/withdrawals', label: 'Withdrawals', icon: 'salary' },
     { path: '/admin/wallet-deposit', label: 'Wallet', icon: 'wallet' },
     { path: '/admin/tickets', label: 'Support', icon: 'support' },
-    { path: '/admin/reports', label: 'Reports', icon: 'reports' },
+    { path: '/admin/reports', label: 'Reports', icon: 'reports', dropdown: true },
     { path: '/admin/settings', label: 'Settings', icon: 'settings' },
   ];
 
@@ -91,6 +100,7 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
       team: <path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />,
       income: <path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />,
       idcard: <><rect x="2" y="5" width="20" height="14" rx="2" /><circle cx="8" cy="12" r="2" /><path d="M14 10h4m-4 3h3" /></>,
+      withdrawal: <><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 12h.01M18 12h.01" /></>,
       profile: <path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />,
       dashboard: <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />,
       users: <path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />,
@@ -107,6 +117,7 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
       close: <path d="M6 18L18 6M6 6l12 12" />,
       collapse: <path d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />,
       expand: <path d="M13 5l7 7-7 7M5 5l7 7-7 7" />,
+      chevronDown: <path d="M19 9l-7 7-7-7" />,
     };
 
     return (
@@ -160,19 +171,61 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
           <nav className="sidebar-nav">
             <div className="nav-section">
               {!collapsed && <span className="nav-section-title">Menu</span>}
-              {links.map((link) => (
-                <Link
-                  key={link.path}
-                  to={link.path}
-                  className={`nav-link ${isActive(link.path, link.matchExact) ? 'active' : ''}`}
-                  onClick={() => setSidebarOpen(false)}
-                  title={collapsed ? link.label : ''}
-                >
-                  <span className="nav-icon"><Icon name={link.icon} /></span>
-                  {!collapsed && <span className="nav-label">{link.label}</span>}
-                  {!collapsed && isActive(link.path, link.matchExact) && <span className="nav-indicator" />}
-                </Link>
-              ))}
+              {links.map((link) => {
+                if (!link.dropdown) {
+                  return (
+                    <Link
+                      key={link.path}
+                      to={link.path}
+                      className={`nav-link ${isActive(link.path, link.matchExact) ? 'active' : ''}`}
+                      onClick={() => setSidebarOpen(false)}
+                      title={collapsed ? link.label : ''}
+                    >
+                      <span className="nav-icon"><Icon name={link.icon} /></span>
+                      {!collapsed && <span className="nav-label">{link.label}</span>}
+                      {!collapsed && isActive(link.path, link.matchExact) && <span className="nav-indicator" />}
+                    </Link>
+                  );
+                }
+                // Reports dropdown (admin only): expandable list of report types
+                const reportsActive = isActive(link.path);
+                const open = reportsOpen && !collapsed;
+                return (
+                  <div key={link.path} className="nav-dropdown">
+                    <button
+                      type="button"
+                      className={`nav-link nav-dropdown-toggle ${reportsActive ? 'active-parent' : ''}`}
+                      onClick={() => (collapsed ? navigate('/admin/reports') : setReportsOpen(!reportsOpen))}
+                      title={collapsed ? link.label : ''}
+                    >
+                      <span className="nav-icon"><Icon name={link.icon} /></span>
+                      {!collapsed && <span className="nav-label">{link.label}</span>}
+                      {!collapsed && (
+                        <span className={`nav-chevron ${open ? 'open' : ''}`}><Icon name="chevronDown" /></span>
+                      )}
+                    </button>
+                    {open && (
+                      <div className="nav-sublist">
+                        {REPORT_TABS.map((r) => {
+                          const subActive =
+                            location.pathname === `/admin/reports/${r.slug}` ||
+                            (location.pathname === '/admin/reports' && r.slug === 'sales');
+                          return (
+                            <Link
+                              key={r.slug}
+                              to={`/admin/reports/${r.slug}`}
+                              className={`nav-sublink ${subActive ? 'active' : ''}`}
+                              onClick={() => setSidebarOpen(false)}
+                            >
+                              {r.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </nav>
 
@@ -293,7 +346,7 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
             left: 0;
             height: 100vh;
             width: var(--sidebar-width);
-            background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+            background: linear-gradient(180deg, #073C39 0%, #0B4541 100%);
             display: flex;
             flex-direction: column;
             z-index: 50;
@@ -410,7 +463,7 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
           }
 
           .admin-badge {
-            background: linear-gradient(135deg, var(--accent-500), #059669);
+            background: linear-gradient(135deg, var(--accent-500), #5D8172);
             color: white;
             padding: 0.25rem 0.625rem;
             border-radius: var(--radius-full);
@@ -512,7 +565,7 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
             gap: 0.875rem;
             padding: 0.75rem 1rem;
             min-height: 44px;
-            color: rgba(255, 255, 255, 0.65);
+            color: #B8CEC5;
             text-decoration: none;
             border-radius: var(--radius-lg);
             margin-bottom: 0.25rem;
@@ -522,14 +575,14 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
           }
 
           .nav-link:hover {
-            background: rgba(255, 255, 255, 0.08);
+            background: rgba(93, 129, 114, 0.25);
             color: rgba(255, 255, 255, 0.95);
           }
 
           .nav-link.active {
-            background: linear-gradient(135deg, var(--primary-500), var(--primary-600));
+            background: var(--accent-500);
             color: white;
-            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.35);
+            box-shadow: 0 4px 15px rgba(7, 60, 57, 0.35);
           }
 
           .nav-link.active::before {
@@ -539,7 +592,7 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
             top: 0;
             bottom: 0;
             width: 3px;
-            background: white;
+            background: var(--gold-300);
             border-radius: 0 2px 2px 0;
           }
 
@@ -576,6 +629,70 @@ const DashboardLayout = ({ children, isAdmin = false }) => {
             height: 6px;
             background: white;
             border-radius: 50%;
+          }
+
+          /* Reports dropdown (admin sidebar) */
+          .nav-dropdown-toggle {
+            width: 100%;
+            border: none;
+            background: none;
+            font-family: inherit;
+            font-size: inherit;
+            text-align: left;
+            cursor: pointer;
+          }
+
+          .nav-dropdown-toggle.active-parent {
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.95);
+          }
+
+          .sidebar.collapsed .nav-dropdown {
+            display: flex;
+          }
+
+          .sidebar.collapsed .nav-dropdown-toggle {
+            justify-content: center;
+          }
+
+          .nav-chevron {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            transition: transform 0.2s ease;
+          }
+
+          .nav-chevron.open {
+            transform: rotate(180deg);
+          }
+
+          .nav-sublist {
+            display: flex;
+            flex-direction: column;
+            margin: 0.25rem 0 0.5rem 2.9rem;
+            padding-left: 0.65rem;
+            border-left: 2px solid rgba(255, 255, 255, 0.1);
+          }
+
+          .nav-sublink {
+            display: block;
+            padding: 0.4rem 0.75rem;
+            font-size: 0.8125rem;
+            color: rgba(255, 255, 255, 0.6);
+            text-decoration: none;
+            border-radius: var(--radius-md);
+            transition: all 0.15s ease;
+          }
+
+          .nav-sublink:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.95);
+          }
+
+          .nav-sublink.active {
+            background: rgba(11, 69, 65, 0.25);
+            color: white;
+            font-weight: 500;
           }
 
           /* Sidebar Footer */

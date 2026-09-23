@@ -1,8 +1,6 @@
 const User = require('../models/User');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
-const SalaryCycle = require('../models/SalaryCycle');
-const SalaryPayout = require('../models/SalaryPayout');
 const WalletTransaction = require('../models/WalletTransaction');
 const Settings = require('../models/Settings');
 const emailService = require('../utils/emailService');
@@ -25,9 +23,12 @@ exports.getUsers = async (req, res) => {
     let query = `
       SELECT u.id, u.name, u.email, u.mobile, u.pan_number, u.pan_status,
              u.referral_code, u.is_active, u.has_active_package, u.created_at,
+             u.rank_name, p.rank_order, COALESCE(w.repurchase_balance, 0) AS repurchase_balance,
              k.kyc_status
       FROM users u
       LEFT JOIN user_kyc k ON u.id = k.user_id
+      LEFT JOIN products p ON p.id = u.current_product_id
+      LEFT JOIN wallets w ON w.user_id = u.id
       WHERE 1=1
     `;
     const params = [];
@@ -41,8 +42,8 @@ exports.getUsers = async (req, res) => {
       params.push(filters.pan_status);
     }
     if (filters.search) {
-      query += ' AND (u.name LIKE ? OR u.email LIKE ? OR u.mobile LIKE ?)';
-      params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
+      query += ' AND (u.name LIKE ? OR u.email LIKE ? OR u.mobile LIKE ? OR u.referral_code LIKE ?)';
+      params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
     }
 
     query += ' ORDER BY u.created_at DESC LIMIT ? OFFSET ?';
@@ -65,7 +66,7 @@ exports.getUsers = async (req, res) => {
     const total = countRows[0].total;
 
     res.json({
-      users: rows,
+      users: rows.map(r => ({ ...r, repurchase_balance: parseFloat(r.repurchase_balance) || 0 })),
       page,
       limit,
       total,
@@ -306,7 +307,7 @@ exports.getProducts = async (req, res) => {
 // Create product
 exports.createProduct = async (req, res) => {
   try {
-    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link } = req.body;
+    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link, rank_name, level_income, rank_order, designs } = req.body;
 
     const productId = await Product.create({
       name,
@@ -319,6 +320,10 @@ exports.createProduct = async (req, res) => {
       image,
       images, // New field for multiple images
       youtube_link,
+      rank_name,
+      level_income, // array of 10 level amounts (levels 1..10)
+      rank_order,
+      designs, // array of {name, description, images: []}
       is_active: true
     });
 
@@ -335,7 +340,7 @@ exports.createProduct = async (req, res) => {
 // Update product
 exports.updateProduct = async (req, res) => {
   try {
-    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link, is_active } = req.body;
+    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link, is_active, rank_name, level_income, rank_order, designs } = req.body;
 
     await Product.update(req.params.id, {
       name,
@@ -348,7 +353,11 @@ exports.updateProduct = async (req, res) => {
       image,
       images, // New field for multiple images
       youtube_link,
-      is_active
+      is_active,
+      rank_name,
+      level_income, // array of 10 level amounts (levels 1..10)
+      rank_order,
+      designs // array of {name, description, images: []}; undefined = unchanged, null/[] = clear
     });
 
     res.json({ message: 'Product updated successfully' });
@@ -370,138 +379,27 @@ exports.deleteProduct = async (req, res) => {
   }
 };
 
-// ==================== SALARY MANAGEMENT ====================
-
-// Get salary cycles
-exports.getSalaryCycles = async (req, res) => {
+// Manually run the auto-repurchase engine for one user (admin/testing).
+exports.runAutoRepurchase = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const filters = {
-      status: req.query.status,
-      sponsor_id: req.query.sponsor_id
-    };
+    const userId = parseInt(req.body.user_id, 10);
+    if (!userId) return res.status(400).json({ message: 'user_id is required' });
 
-    const cycles = await SalaryCycle.getAll(page, limit, filters);
-    const total = await SalaryCycle.countAll(filters);
-
+    const autoRepurchaseService = require('../services/autoRepurchaseService');
+    const created = await autoRepurchaseService.processUser(userId);
     res.json({
-      cycles,
-      page,
-      limit,
-      total,
-      pages: Math.max(1, Math.ceil(total / limit))
+      message: created.length > 0
+        ? `Auto repurchase completed: ${created.length} upgrade(s)`
+        : 'No upgrade possible (balance insufficient, top rank, or engine disabled)',
+      upgrades: created
     });
   } catch (error) {
-    console.error('Get salary cycles error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Run auto repurchase error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
 
-// Get payouts
-exports.getPayouts = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const filters = {
-      status: req.query.status,
-      user_id: req.query.user_id,
-      month: req.query.month,
-      year: req.query.year,
-      date: req.query.date
-    };
-
-    const payouts = await SalaryPayout.getAll(page, limit, filters);
-    const total = await SalaryPayout.countAll(filters);
-
-    res.json({
-      payouts,
-      page,
-      limit,
-      total,
-      pages: Math.max(1, Math.ceil(total / limit))
-    });
-  } catch (error) {
-    console.error('Get payouts error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// Update payout status
-exports.updatePayoutStatus = async (req, res) => {
-  try {
-    const { status } = req.body;
-    const paidAt = status === 'paid' ? new Date() : null;
-
-    await SalaryPayout.updateStatus(req.params.id, status, paidAt);
-
-    // Send payout email if status is 'paid'
-    if (status === 'paid') {
-      const payout = await SalaryPayout.getById(req.params.id);
-      if (payout) {
-        const user = await User.findById(payout.user_id);
-        if (user) {
-          const cycle = await SalaryCycle.getById(payout.cycle_id);
-          const cycleName = cycle ? `Cycle ${cycle.id}` : 'Monthly';
-          emailService.sendPayoutEmail(user, payout.amount, cycleName)
-            .catch(err => console.error('Payout email error:', err));
-        }
-      }
-    }
-
-    res.json({ message: 'Payout status updated' });
-  } catch (error) {
-    console.error('Update payout status error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// Bulk update payouts (used by the clubbed "Mark Paid" button on /admin/salary)
-exports.bulkUpdatePayouts = async (req, res) => {
-  try {
-    const { payout_ids, status } = req.body;
-
-    if (!Array.isArray(payout_ids) || payout_ids.length === 0) {
-      return res.status(400).json({ message: 'payout_ids must be a non-empty array' });
-    }
-    if (!['pending', 'paid'].includes(status)) {
-      return res.status(400).json({ message: 'Invalid status' });
-    }
-
-    const paidAt = status === 'paid' ? new Date() : null;
-    let updated = 0;
-
-    for (const id of payout_ids) {
-      await SalaryPayout.updateStatus(id, status, paidAt);
-      updated++;
-
-      // Mirror single-payout handler: email the user when marked paid
-      if (status === 'paid') {
-        try {
-          const payout = await SalaryPayout.getById(id);
-          if (payout) {
-            const user = await User.findById(payout.user_id);
-            if (user) {
-              const cycle = await SalaryCycle.getById(payout.cycle_id);
-              const cycleName = cycle ? `Cycle ${cycle.id}` : 'Monthly';
-              emailService.sendPayoutEmail(user, payout.amount, cycleName)
-                .catch(err => console.error('Payout email error:', err));
-            }
-          }
-        } catch (err) {
-          console.error('Bulk payout email error:', err);
-        }
-      }
-    }
-
-    res.json({ message: 'Payouts updated successfully', updated });
-  } catch (error) {
-    console.error('Bulk update payouts error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// ==================== REPORTS ====================
+// ==================== DASHBOARD + REPORTS (new income model) ====================
 
 // Get dashboard stats
 exports.getDashboardStats = async (req, res) => {
@@ -511,36 +409,33 @@ exports.getDashboardStats = async (req, res) => {
     const totalOrders = await Order.count();
     const totalSales = await Order.getTotalSales();
 
-    const pendingPayouts = await SalaryPayout.countByStatus('pending');
-    const pendingAmount = await SalaryPayout.getTotalByStatus('pending');
-    const paidAmount = await SalaryPayout.getTotalByStatus('paid');
-
-    const activeLiability = await SalaryCycle.getTotalActiveLiability();
-    const activeCycles = await SalaryCycle.countByStatus('active');
-    const pausedCycles = await SalaryCycle.countByStatus('paused');
-    const completedCycles = await SalaryCycle.countByStatus('completed');
+    const [wdStats] = await pool.execute(
+      `SELECT
+         SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending_count,
+         COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0) AS pending_amount,
+         COALESCE(SUM(CASE WHEN status='processed' THEN amount ELSE 0 END),0) AS processed_amount
+       FROM withdrawal_requests`
+    );
+    const [[rpStats]] = await pool.execute(
+      `SELECT COALESCE(SUM(repurchase_amount),0) AS total FROM withdrawal_requests WHERE status = 'processed'`
+    );
+    const [[tiStats]] = await pool.execute(
+      `SELECT COALESCE(SUM(amount),0) AS total FROM team_income_events`
+    );
 
     const recentOrders = await Order.getRecent(10);
 
     res.json({
-      users: {
-        total: totalUsers,
-        active: activeUsers
+      users: { total: totalUsers, active: activeUsers },
+      orders: { total: totalOrders, total_sales: totalSales },
+      withdrawals: {
+        pending_count: parseInt(wdStats[0].pending_count) || 0,
+        pending_amount: parseFloat(wdStats[0].pending_amount) || 0,
+        processed_amount: parseFloat(wdStats[0].processed_amount) || 0
       },
-      orders: {
-        total: totalOrders,
-        total_sales: totalSales
-      },
-      salary: {
-        pending_payouts: pendingPayouts,
-        pending_amount: pendingAmount,
-        paid_amount: paidAmount,
-        active_liability: activeLiability
-      },
-      cycles: {
-        active: activeCycles,
-        paused: pausedCycles,
-        completed: completedCycles
+      income: {
+        team_income_paid: parseFloat(tiStats.total) || 0,
+        repurchase_credited: parseFloat(rpStats.total) || 0
       },
       recentOrders
     });
@@ -570,38 +465,123 @@ exports.getSalesReport = async (req, res) => {
   }
 };
 
-// Salary report (daily incentive + withdrawals)
-exports.getSalaryReport = async (req, res) => {
+// Team Income report — distribution events
+exports.getTeamIncomeReport = async (req, res) => {
   try {
-    const { year } = req.query;
-    const currentYear = year || new Date().getFullYear();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
 
-    const dailySummary = await SalaryPayout.getDailyPayoutSummary(currentYear);
-    const liabilityReport = await SalaryCycle.getLiabilityReport();
-
+    const [rows] = await pool.execute(
+      `SELECT tie.*, pu.name AS purchaser_name, uu.name AS upline_name, uu.referral_code AS upline_code,
+              p.rank_name AS product_rank,
+              COALESCE(o.order_source, 'user') AS order_source
+       FROM team_income_events tie
+       JOIN users pu ON tie.purchaser_id = pu.id
+       JOIN users uu ON tie.upline_id = uu.id
+       LEFT JOIN products p ON tie.product_id = p.id
+       LEFT JOIN orders o ON o.id = tie.order_id
+       ORDER BY tie.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    const [[totals]] = await pool.execute(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(amount),0) AS amount FROM team_income_events`
+    );
+    const [[srcTotals]] = await pool.execute(
+      `SELECT
+         COALESCE(SUM(CASE WHEN COALESCE(o.order_source,'user')='auto_repurchase' THEN tie.amount ELSE 0 END),0) AS repurchase_total,
+         COALESCE(SUM(CASE WHEN COALESCE(o.order_source,'user')<>'auto_repurchase' THEN tie.amount ELSE 0 END),0) AS purchase_total
+       FROM team_income_events tie
+       LEFT JOIN orders o ON o.id = tie.order_id`
+    );
     res.json({
-      daily_summary: dailySummary,
-      liability_report: liabilityReport,
-      year: currentYear
+      events: rows,
+      page, limit,
+      total: totals.total,
+      pages: Math.max(1, Math.ceil(totals.total / limit)),
+      totals: {
+        total_amount: parseFloat(totals.amount) || 0,
+        purchase_total: parseFloat(srcTotals.purchase_total) || 0,
+        repurchase_total: parseFloat(srcTotals.repurchase_total) || 0
+      }
     });
   } catch (error) {
-    console.error('Get salary report error:', error);
+    console.error('Get team income report error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// Liability report
-exports.getLiabilityReport = async (req, res) => {
+// Withdrawal report — all withdrawal requests
+exports.getWithdrawalReport = async (req, res) => {
   try {
-    const liabilityReport = await SalaryCycle.getLiabilityReport();
-    const totalLiability = await SalaryCycle.getTotalActiveLiability();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const filters = {};
+    if (req.query.status) filters.status = req.query.status;
 
+    const { withdrawalService } = require('../services/withdrawalService');
+    const result = await withdrawalService.getAllWithdrawals(page, limit, filters);
+
+    const [byStatusRows] = await pool.execute(
+      `SELECT status, COUNT(*) AS count, COALESCE(SUM(amount),0) AS amount,
+              COALESCE(SUM(CASE WHEN status = 'processed' THEN admin_charge ELSE 0 END),0) AS admin_charge,
+              COALESCE(SUM(CASE WHEN status = 'processed' THEN repurchase_amount ELSE 0 END),0) AS repurchase_amount,
+              COALESCE(SUM(CASE WHEN status = 'processed' THEN payout_amount ELSE 0 END),0) AS payout_amount
+       FROM withdrawal_requests GROUP BY status`
+    );
+    res.json({ ...result, by_status: byStatusRows });
+  } catch (error) {
+    console.error('Get withdrawal report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// User earnings report — per-user income breakdown
+exports.getUserEarningsReport = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    const [rows] = await pool.execute(
+      `SELECT
+         u.id, u.name, u.email, u.mobile, u.referral_code, u.has_active_package, u.rank_name,
+         COALESCE(ti.total, 0) AS team_income_total,
+         COALESCE(w.earnings_balance, 0) AS available_for_withdrawal,
+         COALESCE(w.repurchase_balance, 0) AS repurchase_balance,
+         COALESCE(wd.withdrawn, 0) AS total_withdrawn,
+         COALESCE(wd.pending, 0) AS pending_withdrawal,
+         COALESCE(ti.total,0) AS total_earnings
+       FROM users u
+       LEFT JOIN (SELECT upline_id, SUM(amount) AS total FROM team_income_events GROUP BY upline_id) ti ON ti.upline_id = u.id
+       LEFT JOIN wallets w ON w.user_id = u.id
+       LEFT JOIN (SELECT user_id,
+                   SUM(CASE WHEN status='processed' THEN amount ELSE 0 END) AS withdrawn,
+                   SUM(CASE WHEN status='pending' THEN amount ELSE 0 END) AS pending
+                  FROM withdrawal_requests GROUP BY user_id) wd ON wd.user_id = u.id
+       WHERE u.role = 'user'
+       ORDER BY total_earnings DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    const [[count]] = await pool.execute(`SELECT COUNT(*) AS total FROM users WHERE role='user'`);
     res.json({
-      liability_by_status: liabilityReport,
-      total_active_liability: totalLiability
+      users: rows.map(r => ({
+        ...r,
+        team_income_total: parseFloat(r.team_income_total) || 0,
+        available_for_withdrawal: parseFloat(r.available_for_withdrawal) || 0,
+        repurchase_balance: parseFloat(r.repurchase_balance) || 0,
+        total_withdrawn: parseFloat(r.total_withdrawn) || 0,
+        pending_withdrawal: parseFloat(r.pending_withdrawal) || 0,
+        total_earnings: parseFloat(r.total_earnings) || 0
+      })),
+      page, limit,
+      total: count.total,
+      pages: Math.max(1, Math.ceil(count.total / limit))
     });
   } catch (error) {
-    console.error('Get liability report error:', error);
+    console.error('Get user earnings report error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -614,25 +594,16 @@ exports.getReferralReport = async (req, res) => {
     const offset = (page - 1) * limit;
     const { start_date, end_date } = req.query;
 
-    // Build date filter for referrals
     let dateFilter = '';
     let params = [];
-
     if (start_date && end_date) {
       dateFilter = 'AND u2.created_at BETWEEN ? AND ?';
       params = [start_date, end_date];
     }
 
-    // Get users with their referral counts
     const query = `
       SELECT
-        u.id,
-        u.name,
-        u.email,
-        u.mobile,
-        u.referral_code,
-        u.has_active_package,
-        u.created_at,
+        u.id, u.name, u.email, u.mobile, u.referral_code, u.has_active_package, u.created_at,
         COUNT(DISTINCT u2.id) as total_referrals,
         SUM(CASE WHEN u2.has_active_package = 1 THEN 1 ELSE 0 END) as active_referrals
       FROM users u
@@ -642,19 +613,13 @@ exports.getReferralReport = async (req, res) => {
       ORDER BY total_referrals DESC
       LIMIT ? OFFSET ?
     `;
-
     params.push(limit, offset);
     const [rows] = await pool.execute(query, params);
 
-    // Get total count
-    const countQuery = `
-      SELECT COUNT(DISTINCT u.id) as total
-      FROM users u
-      WHERE EXISTS (
-        SELECT 1 FROM users u2 WHERE u2.referred_by = u.id
-      )
-    `;
-    const [countRows] = await pool.execute(countQuery);
+    const [countRows] = await pool.execute(
+      `SELECT COUNT(DISTINCT u.id) as total FROM users u
+       WHERE EXISTS (SELECT 1 FROM users u2 WHERE u2.referred_by = u.id)`
+    );
 
     res.json({
       users: rows.map(row => ({
@@ -662,8 +627,7 @@ exports.getReferralReport = async (req, res) => {
         total_referrals: parseInt(row.total_referrals) || 0,
         active_referrals: parseInt(row.active_referrals) || 0
       })),
-      page,
-      limit,
+      page, limit,
       total: countRows[0].total,
       pages: Math.ceil(countRows[0].total / limit)
     });
@@ -673,21 +637,77 @@ exports.getReferralReport = async (req, res) => {
   }
 };
 
-// ==================== SETTINGS ====================
-
-// Get settings
-exports.getSettings = async (req, res) => {
+// Rank report — distribution across ranks + auto-repurchase (rank upgrade) history
+exports.getRankReport = async (req, res) => {
   try {
-    const settings = await Settings.getPackageSettings();
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+
+    const [distribution] = await pool.execute(
+      `SELECT p.id AS product_id, p.rank_name, p.rank_order, p.price,
+              COUNT(u.id) AS user_count
+       FROM products p
+       LEFT JOIN users u ON u.current_product_id = p.id AND u.role = 'user'
+       WHERE p.rank_name IS NOT NULL
+       GROUP BY p.id, p.rank_name, p.rank_order, p.price
+       ORDER BY p.rank_order ASC`
+    );
+    const [[noRank]] = await pool.execute(
+      `SELECT COUNT(*) AS user_count FROM users
+       WHERE role = 'user' AND (current_product_id IS NULL OR rank_name IS NULL)`
+    );
+
+    const [upgrades] = await pool.execute(
+      `SELECT o.id, o.created_at, o.amount, o.source_withdrawal_id,
+              u.id AS user_id, u.name AS user_name, u.referral_code AS user_code,
+              p.rank_name, p.name AS product_name
+       FROM orders o
+       JOIN users u ON u.id = o.user_id
+       JOIN products p ON p.id = o.product_id
+       WHERE o.order_source = 'auto_repurchase'
+       ORDER BY o.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    const [[upgradeTotals]] = await pool.execute(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(amount),0) AS amount
+       FROM orders WHERE order_source = 'auto_repurchase'`
+    );
 
     res.json({
+      distribution: distribution.map(r => ({
+        ...r,
+        price: parseFloat(r.price) || 0,
+        user_count: parseInt(r.user_count) || 0
+      })),
+      no_rank_count: parseInt(noRank.user_count) || 0,
+      upgrades,
+      page, limit,
+      total: upgradeTotals.total,
+      pages: Math.max(1, Math.ceil(upgradeTotals.total / limit)),
+      totals: {
+        count: parseInt(upgradeTotals.total) || 0,
+        amount: parseFloat(upgradeTotals.amount) || 0
+      }
+    });
+  } catch (error) {
+    console.error('Get rank report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ==================== SETTINGS (income settings + audit) ====================
+
+// Get income settings + repurchase/auto-repurchase flags
+exports.getSettings = async (req, res) => {
+  try {
+    const income = await Settings.getIncomeSettings();
+    const repurchase = await Settings.get('repurchase_enabled');
+    res.json({
       settings: {
-        package_price: settings.package_price,
-        min_payout_amount: settings.min_payout_amount,
-        default_daily_amount: settings.default_daily_amount,
-        default_days: settings.default_days,
-        payout_day: settings.payout_day,
-        repurchase_enabled: settings.repurchase_enabled
+        ...income,
+        repurchase_enabled: repurchase === 'true'
       }
     });
   } catch (error) {
@@ -696,42 +716,79 @@ exports.getSettings = async (req, res) => {
   }
 };
 
-// Update settings
+// Update income settings. Each changed key is written to the audit log.
 exports.updateSettings = async (req, res) => {
+  const SettingAuditLog = require('../models/SettingAuditLog');
+  const connection = await pool.getConnection();
   try {
-    const {
-      package_price,
-      min_payout_amount,
-      default_daily_amount,
-      default_days,
-      payout_day,
-      repurchase_enabled
-    } = req.body;
+    const body = req.body || {};
+    const adminId = req.user.id;
+    const ip = req.ip || (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
 
-    // Changing the payout day resets the weekly idempotency marker so the new
-    // day takes effect immediately (next cron tick on/after the new day sweeps).
-    // Only reset when the day actually changes — saving unrelated settings
-    // must not perturb the payout schedule.
-    if (payout_day !== undefined) {
-      const currentPayoutDay = await Settings.get('payout_day');
-      const currentVal = currentPayoutDay != null ? parseInt(currentPayoutDay, 10) : 1;
-      if (parseInt(payout_day, 10) !== currentVal) {
-        await Settings.set('last_payout_date', '1970-01-01');
+    // Allowed income-setting keys (flat, as sent by the frontend).
+    // Level income is configured per product (admin Products page).
+    const allowed = [
+      'qualification_levels_per_direct', 'qualification_max_levels',
+      'withdrawal_min_amount', 'withdrawal_start_time', 'withdrawal_end_time', 'withdrawal_timezone',
+      'withdrawal_admin_charge_percent', 'repurchase_share_percent',
+      'auto_repurchase_enabled',
+      'repurchase_enabled'
+    ];
+
+    const toUpdate = {};
+    for (const k of allowed) {
+      if (body[k] !== undefined) toUpdate[k] = body[k];
+    }
+
+    await connection.beginTransaction();
+
+    // Audit each changed key.
+    for (const [key, newVal] of Object.entries(toUpdate)) {
+      const prev = await Settings.get(key);
+      const prevStr = prev != null ? String(prev) : null;
+      const newStr = newVal != null ? String(newVal) : null;
+      if (prevStr !== newStr) {
+        await SettingAuditLog.create({
+          admin_id: adminId, setting_key: key,
+          previous_value: prevStr, new_value: newStr, ip_address: ip
+        }, connection);
       }
     }
 
-    await Settings.updatePackageSettings({
-      package_price,
-      min_payout_amount,
-      default_daily_amount,
-      default_days,
-      payout_day,
-      repurchase_enabled
-    });
+    const { repurchase_enabled, auto_repurchase_enabled, ...incomeKeys } = toUpdate;
+    await Settings.updateIncomeSettings(incomeKeys, connection);
+    if (repurchase_enabled !== undefined) {
+      await Settings.set('repurchase_enabled', repurchase_enabled, connection);
+    }
+    if (auto_repurchase_enabled !== undefined) {
+      await Settings.set('auto_repurchase_enabled', auto_repurchase_enabled, connection);
+    }
 
+    await connection.commit();
     res.json({ message: 'Settings updated successfully' });
   } catch (error) {
+    try { await connection.rollback(); } catch (_) {}
     console.error('Update settings error:', error);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    connection.release();
+  }
+};
+
+// Settings audit log (§13)
+exports.getSettingsAuditLogs = async (req, res) => {
+  try {
+    const SettingAuditLog = require('../models/SettingAuditLog');
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const logs = await SettingAuditLog.getAll(page, limit);
+    const total = await SettingAuditLog.countAll();
+    res.json({
+      logs, page, limit, total,
+      pages: Math.max(1, Math.ceil(total / limit))
+    });
+  } catch (error) {
+    console.error('Get settings audit logs error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -1120,342 +1177,6 @@ exports.getWalletReport = async (req, res) => {
   }
 };
 
-// Get payouts with KYC details for export
-exports.getPayoutsWithKYC = async (req, res) => {
-  try {
-    const { month, year, status, date } = req.query;
-
-    let query = `
-      SELECT
-        sp.id,
-        sp.amount,
-        sp.status,
-        sp.month,
-        sp.year,
-        sp.payout_date,
-        sp.cycle_id,
-        sp.created_at,
-        u.id as user_id,
-        u.name,
-        u.email,
-        u.mobile,
-        u.pan_number,
-        u.pan_status,
-        u.referral_code,
-        k.bank_name,
-        k.account_number,
-        k.ifsc_code,
-        k.branch_name,
-        k.nominee_name,
-        k.nominee_relation,
-        k.kyc_status,
-        CASE
-          WHEN u.pan_status = 'approved' AND k.kyc_status = 'approved' THEN 'complete'
-          ELSE 'incomplete'
-        END as verification_status
-      FROM salary_payouts sp
-      JOIN users u ON sp.user_id = u.id
-      LEFT JOIN user_kyc k ON u.id = k.user_id
-      WHERE 1=1
-    `;
-    const params = [];
-
-    if (status) {
-      query += ' AND sp.status = ?';
-      params.push(status);
-    }
-    if (date) {
-      query += ' AND sp.payout_date = ?';
-      params.push(date);
-    } else if (month && year) {
-      query += ' AND sp.month = ? AND sp.year = ?';
-      params.push(month, year);
-    }
-
-    query += ' ORDER BY sp.created_at DESC';
-
-    const [rows] = await pool.execute(query, params);
-
-    // Calculate totals
-    const totalAmount = rows.reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
-    const completeCount = rows.filter(r => r.verification_status === 'complete').length;
-    const incompleteCount = rows.filter(r => r.verification_status === 'incomplete').length;
-
-    res.json({
-      payouts: rows,
-      summary: {
-        total_count: rows.length,
-        total_amount: totalAmount,
-        complete_count: completeCount,
-        incomplete_count: incompleteCount
-      }
-    });
-  } catch (error) {
-    console.error('Get payouts with KYC error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// Export payouts to Excel
-exports.exportPayoutsExcel = async (req, res) => {
-  try {
-    const XLSX = require('xlsx');
-    const { month, year, status, date } = req.query;
-
-    let query = `
-      SELECT
-        u.name as 'Name',
-        u.email as 'Email',
-        u.mobile as 'Mobile',
-        u.referral_code as 'User ID',
-        sp.amount as 'Amount',
-        sp.status as 'Payout Status',
-        sp.payout_date as 'Payout Date',
-        u.pan_number as 'PAN Number',
-        u.pan_status as 'PAN Status',
-        k.bank_name as 'Bank Name',
-        k.account_number as 'Account Number',
-        k.ifsc_code as 'IFSC Code',
-        k.branch_name as 'Branch Name',
-        k.nominee_name as 'Nominee Name',
-        k.nominee_relation as 'Nominee Relation',
-        k.kyc_status as 'KYC Status',
-        CASE
-          WHEN u.pan_status = 'approved' AND k.kyc_status = 'approved' THEN 'Complete'
-          ELSE 'Incomplete'
-        END as 'Verification Status'
-      FROM salary_payouts sp
-      JOIN users u ON sp.user_id = u.id
-      LEFT JOIN user_kyc k ON u.id = k.user_id
-      WHERE 1=1
-    `;
-    const params = [];
-
-    if (status) {
-      query += ' AND sp.status = ?';
-      params.push(status);
-    }
-    if (date) {
-      query += ' AND sp.payout_date = ?';
-      params.push(date);
-    } else if (month && year) {
-      query += ' AND sp.month = ? AND sp.year = ?';
-      params.push(month, year);
-    }
-
-    query += ' ORDER BY u.name ASC';
-
-    const [rows] = await pool.execute(query, params);
-
-    // Create workbook and worksheet
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(rows);
-
-    // Set column widths
-    ws['!cols'] = [
-      { wch: 20 }, // Name
-      { wch: 25 }, // Email
-      { wch: 15 }, // Mobile
-      { wch: 12 }, // User ID
-      { wch: 10 }, // Amount
-      { wch: 12 }, // Payout Status
-      { wch: 14 }, // Payout Date
-      { wch: 15 }, // PAN Number
-      { wch: 12 }, // PAN Status
-      { wch: 20 }, // Bank Name
-      { wch: 18 }, // Account Number
-      { wch: 12 }, // IFSC Code
-      { wch: 20 }, // Branch Name
-      { wch: 20 }, // Nominee Name
-      { wch: 15 }, // Nominee Relation
-      { wch: 12 }, // KYC Status
-      { wch: 15 }, // Verification Status
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Payouts');
-
-    // Generate buffer
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
-    // Set headers for download
-    const filename = `payouts-export-${new Date().toISOString().split('T')[0]}.xlsx`;
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
-  } catch (error) {
-    console.error('Export payouts Excel error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// ==================== BUSINESS BONUS ====================
-
-// Get business bonus report
-exports.getBusinessBonusReport = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const { search } = req.query;
-
-    const BusinessBonus = require('../models/BusinessBonus');
-    const bonuses = await BusinessBonus.getAll(page, limit, { search });
-    const total = await BusinessBonus.count({ search });
-    const summary = await BusinessBonus.getSummary();
-
-    res.json({
-      bonuses: bonuses.map(b => ({
-        ...b,
-        total_direct_business: parseFloat(b.total_direct_business) || 0,
-        bonus_earned: parseFloat(b.bonus_earned) || 0,
-        pending_bonus: parseFloat(b.pending_bonus) || 0,
-        paid_bonus: parseFloat(b.paid_bonus) || 0
-      })),
-      summary: {
-        ...summary,
-        total_business: parseFloat(summary.total_business) || 0,
-        total_bonus_earned: parseFloat(summary.total_bonus_earned) || 0,
-        pending_bonus: parseFloat(summary.pending_bonus) || 0,
-        paid_bonus: parseFloat(summary.paid_bonus) || 0
-      },
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit)
-    });
-  } catch (error) {
-    console.error('Get business bonus report error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// Get bonus payouts
-exports.getBonusPayouts = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const { status } = req.query;
-
-    const BusinessBonus = require('../models/BusinessBonus');
-    const payouts = await BusinessBonus.getAllPayouts(page, limit, { status });
-
-    // Get totals
-    const [totals] = await pool.execute(`
-      SELECT
-        COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as pending_amount,
-        COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) as paid_amount,
-        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_count
-      FROM bonus_payouts
-    `);
-
-    res.json({
-      payouts: payouts.map(p => ({
-        ...p,
-        amount: parseFloat(p.amount) || 0,
-        milestone_amount: parseFloat(p.milestone_amount) || 0
-      })),
-      summary: totals[0],
-      page,
-      limit
-    });
-  } catch (error) {
-    console.error('Get bonus payouts error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// Update bonus payout status
-exports.updateBonusPayoutStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-
-    const BusinessBonus = require('../models/BusinessBonus');
-    await BusinessBonus.updatePayoutStatus(id, status);
-
-    res.json({ message: 'Bonus payout status updated' });
-  } catch (error) {
-    console.error('Update bonus payout error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// Recalculate all business bonuses
-exports.recalculateBonuses = async (req, res) => {
-  try {
-    const BusinessBonus = require('../models/BusinessBonus');
-    const count = await BusinessBonus.recalculateAll();
-
-    res.json({
-      message: 'Business bonuses recalculated',
-      users_processed: count
-    });
-  } catch (error) {
-    console.error('Recalculate bonuses error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// Export bonus payouts to Excel
-exports.exportBonusPayoutsExcel = async (req, res) => {
-  try {
-    const XLSX = require('xlsx');
-    const { status } = req.query;
-
-    let query = `
-      SELECT
-        u.name as 'Name',
-        u.email as 'Email',
-        u.mobile as 'Mobile',
-        u.referral_code as 'User ID',
-        bp.amount as 'Bonus Amount',
-        bp.milestone_amount as 'Milestone',
-        bp.status as 'Status',
-        bp.created_at as 'Created',
-        u.pan_status as 'PAN Status',
-        k.bank_name as 'Bank Name',
-        k.account_number as 'Account Number',
-        k.ifsc_code as 'IFSC Code',
-        k.branch_name as 'Branch',
-        k.kyc_status as 'KYC Status'
-      FROM bonus_payouts bp
-      JOIN users u ON bp.user_id = u.id
-      LEFT JOIN user_kyc k ON u.id = k.user_id
-      WHERE 1=1
-    `;
-    const params = [];
-
-    if (status) {
-      query += ' AND bp.status = ?';
-      params.push(status);
-    }
-
-    query += ' ORDER BY bp.created_at DESC';
-
-    const [rows] = await pool.execute(query, params);
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(rows);
-
-    ws['!cols'] = [
-      { wch: 20 }, { wch: 25 }, { wch: 15 }, { wch: 12 },
-      { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 18 },
-      { wch: 12 }, { wch: 20 }, { wch: 18 }, { wch: 12 },
-      { wch: 20 }, { wch: 12 }
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, 'Bonus Payouts');
-
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    const filename = `bonus-payouts-${new Date().toISOString().split('T')[0]}.xlsx`;
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
-  } catch (error) {
-    console.error('Export bonus payouts error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
 // Get user financial report
 exports.getUserFinancialReport = async (req, res) => {
   try {
@@ -1486,31 +1207,23 @@ exports.getUserFinancialReport = async (req, res) => {
         COALESCE(w.balance, 0) as wallet_balance,
         COALESCE(earnings.total_earned, 0) as total_earned,
         COALESCE(pending.pending_amount, 0) as pending_income,
-        COALESCE(liability.remaining_liability, 0) as liability,
+        0 as liability,
         COALESCE(directs.direct_count, 0) as direct_count,
         COALESCE(directs.active_directs, 0) as active_directs
       FROM users u
       LEFT JOIN wallets w ON u.id = w.user_id
       LEFT JOIN (
         SELECT user_id, SUM(amount) as total_earned
-        FROM salary_payouts
-        WHERE status = 'paid'
+        FROM wallet_transactions
+        WHERE type IN ('team_income') AND status = 'completed'
         GROUP BY user_id
       ) earnings ON u.id = earnings.user_id
       LEFT JOIN (
         SELECT user_id, SUM(amount) as pending_amount
-        FROM salary_payouts
+        FROM withdrawal_requests
         WHERE status = 'pending'
         GROUP BY user_id
       ) pending ON u.id = pending.user_id
-      LEFT JOIN (
-        SELECT sponsor_id,
-          COUNT(*) as cycle_count,
-          SUM((duration - months_paid) * monthly_amount) as remaining_liability
-        FROM salary_cycles
-        WHERE status = 'active'
-        GROUP BY sponsor_id
-      ) liability ON u.id = liability.sponsor_id
       LEFT JOIN (
         SELECT referred_by,
           COUNT(*) as direct_count,
@@ -1541,25 +1254,19 @@ exports.getUserFinancialReport = async (req, res) => {
       SELECT
         COALESCE(SUM(w.balance), 0) as total_wallet_balance,
         COALESCE(SUM(earnings.total_earned), 0) as total_earned,
-        COALESCE(SUM(pending.pending_amount), 0) as total_pending,
-        COALESCE(SUM(liability.remaining_liability), 0) as total_liability
+        COALESCE(SUM(pending.pending_amount), 0) as total_pending
       FROM users u
       LEFT JOIN wallets w ON u.id = w.user_id
       LEFT JOIN (
         SELECT user_id, SUM(amount) as total_earned
-        FROM salary_payouts WHERE status = 'paid'
+        FROM wallet_transactions WHERE type IN ('team_income') AND status = 'completed'
         GROUP BY user_id
       ) earnings ON u.id = earnings.user_id
       LEFT JOIN (
         SELECT user_id, SUM(amount) as pending_amount
-        FROM salary_payouts WHERE status = 'pending'
+        FROM withdrawal_requests WHERE status = 'pending'
         GROUP BY user_id
       ) pending ON u.id = pending.user_id
-      LEFT JOIN (
-        SELECT sponsor_id, SUM((duration - months_paid) * monthly_amount) as remaining_liability
-        FROM salary_cycles WHERE status = 'active'
-        GROUP BY sponsor_id
-      ) liability ON u.id = liability.sponsor_id
     `);
 
     res.json({
@@ -1579,12 +1286,302 @@ exports.getUserFinancialReport = async (req, res) => {
       grand_totals: {
         total_wallet_balance: parseFloat(grandTotals[0].total_wallet_balance) || 0,
         total_earned: parseFloat(grandTotals[0].total_earned) || 0,
-        total_pending: parseFloat(grandTotals[0].total_pending) || 0,
-        total_liability: parseFloat(grandTotals[0].total_liability) || 0
+        total_pending: parseFloat(grandTotals[0].total_pending) || 0
       }
     });
   } catch (error) {
     console.error('Get user financial report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ==================== USER DETAILED REPORT ====================
+
+// Shared WHERE fragment for the user-detail report family (role='user' only,
+// optional search + active-only filter).
+const buildUserReportWhere = (search, activeOnly) => {
+  let where = "u.role = 'user'";
+  const params = [];
+  if (activeOnly) {
+    where += ' AND u.has_active_package = 1';
+  }
+  if (search) {
+    where += ' AND (u.name LIKE ? OR u.email LIKE ? OR u.mobile LIKE ? OR u.referral_code LIKE ?)';
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  return { where, params };
+};
+
+// Aggregates joined onto users for the per-user financial rollups.
+const USER_REPORT_JOIN = `
+  LEFT JOIN wallets w ON w.user_id = u.id
+  LEFT JOIN (
+    SELECT user_id, COALESCE(SUM(amount),0) AS total
+    FROM wallet_transactions WHERE type = 'deposit' AND status = 'completed'
+    GROUP BY user_id
+  ) dep ON dep.user_id = u.id
+  LEFT JOIN (
+    SELECT user_id, COALESCE(SUM(amount),0) AS total
+    FROM wallet_transactions
+    WHERE type IN ('team_income','self_cashback','bonus','incentive','refund')
+      AND status = 'completed'
+    GROUP BY user_id
+  ) inc ON inc.user_id = u.id
+  LEFT JOIN (
+    SELECT user_id,
+           COALESCE(SUM(CASE WHEN status != 'cancelled' THEN amount ELSE 0 END),0) AS amount,
+           COUNT(CASE WHEN status != 'cancelled' THEN 1 END) AS cnt
+    FROM orders GROUP BY user_id
+  ) pur ON pur.user_id = u.id
+  LEFT JOIN (
+    SELECT user_id,
+           COALESCE(SUM(CASE WHEN status = 'processed' THEN payout_amount ELSE 0 END),0) AS payout,
+           COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END),0) AS pending
+    FROM withdrawal_requests GROUP BY user_id
+  ) wd ON wd.user_id = u.id
+  LEFT JOIN (
+    SELECT referred_by,
+           COUNT(*) AS direct_count,
+           SUM(CASE WHEN has_active_package = 1 THEN 1 ELSE 0 END) AS active_directs
+    FROM users GROUP BY referred_by
+  ) dl ON dl.referred_by = u.id
+`;
+
+// Active-users list for the User Detail report tab: every user with their
+// financial rollups, paginated + searchable, optional active-only filter.
+exports.getUserReportList = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+    const { where, params } = buildUserReportWhere(req.query.search, req.query.active_only === '1');
+
+    const query = `
+      SELECT
+        u.id, u.name, u.email, u.mobile, u.referral_code,
+        u.has_active_package, u.is_active, u.rank_name, u.created_at,
+        COALESCE(w.balance, 0) AS wallet_balance,
+        COALESCE(w.earnings_balance, 0) AS earnings_balance,
+        COALESCE(w.repurchase_balance, 0) AS repurchase_balance,
+        COALESCE(dep.total, 0) AS total_deposits,
+        COALESCE(inc.total, 0) AS total_income,
+        COALESCE(pur.amount, 0) AS total_purchases,
+        COALESCE(pur.cnt, 0) AS total_order_count,
+        COALESCE(wd.payout, 0) AS total_withdrawn,
+        COALESCE(wd.pending, 0) AS pending_withdrawal,
+        COALESCE(dl.direct_count, 0) AS direct_count,
+        COALESCE(dl.active_directs, 0) AS active_directs
+      FROM users u
+      ${USER_REPORT_JOIN}
+      WHERE ${where}
+      ORDER BY u.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    const [rows] = await pool.execute(query, [...params, limit, offset]);
+
+    const [[{ total }]] = await pool.execute(
+      `SELECT COUNT(*) AS total FROM users u WHERE ${where}`,
+      params
+    );
+
+    const [[totals]] = await pool.execute(
+      `SELECT
+         COALESCE(SUM(COALESCE(w.balance,0)),0) AS wallet_balance,
+         COALESCE(SUM(COALESCE(dep.total,0)),0) AS deposits,
+         COALESCE(SUM(COALESCE(inc.total,0)),0) AS income,
+         COALESCE(SUM(COALESCE(pur.amount,0)),0) AS purchases
+       FROM users u
+       ${USER_REPORT_JOIN}
+       WHERE ${where}`,
+      params
+    );
+
+    res.json({
+      users: rows.map(row => ({
+        ...row,
+        wallet_balance: parseFloat(row.wallet_balance) || 0,
+        earnings_balance: parseFloat(row.earnings_balance) || 0,
+        repurchase_balance: parseFloat(row.repurchase_balance) || 0,
+        total_deposits: parseFloat(row.total_deposits) || 0,
+        total_income: parseFloat(row.total_income) || 0,
+        total_purchases: parseFloat(row.total_purchases) || 0,
+        total_withdrawn: parseFloat(row.total_withdrawn) || 0,
+        pending_withdrawal: parseFloat(row.pending_withdrawal) || 0,
+        direct_count: parseInt(row.direct_count) || 0,
+        active_directs: parseInt(row.active_directs) || 0
+      })),
+      page,
+      limit,
+      total: parseInt(total) || 0,
+      pages: Math.max(1, Math.ceil(total / limit)),
+      totals: {
+        wallet_balance: parseFloat(totals.wallet_balance) || 0,
+        deposits: parseFloat(totals.deposits) || 0,
+        income: parseFloat(totals.income) || 0,
+        purchases: parseFloat(totals.purchases) || 0
+      }
+    });
+  } catch (error) {
+    console.error('Get user report list error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Complete single-user report: profile + sponsor, wallet balances, summary
+// stats, level-wise downline, and the FULL history of every transaction
+// (wallet ledger, orders, team income events, withdrawals) — no pagination,
+// so exports get everything in one response.
+exports.getUserDetailReport = async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!userId) return res.status(400).json({ message: 'Invalid user id' });
+
+    // Profile + sponsor + wallet balances + current rank product
+    const [profileRows] = await pool.execute(
+      `SELECT u.id, u.name, u.email, u.mobile, u.state, u.address, u.referral_code,
+              u.pan_number, u.pan_status, u.gst_number, u.rank_name,
+              u.has_active_package, u.is_active, u.created_at,
+              sp.name AS sponsor_name, sp.referral_code AS sponsor_code,
+              w.balance, w.earnings_balance, w.repurchase_balance,
+              p.name AS product_name, p.price AS product_price
+       FROM users u
+       LEFT JOIN users sp ON sp.id = u.referred_by
+       LEFT JOIN wallets w ON w.user_id = u.id
+       LEFT JOIN products p ON p.id = u.current_product_id
+       WHERE u.id = ?`,
+      [userId]
+    );
+    const profile = profileRows[0];
+    if (!profile) return res.status(404).json({ message: 'User not found' });
+
+    // Summary stats (same rollups as the list view, for this one user)
+    const [[summary]] = await pool.execute(
+      `SELECT
+         (SELECT COALESCE(SUM(amount),0) FROM wallet_transactions
+          WHERE user_id = ? AND type = 'deposit' AND status = 'completed') AS total_deposits,
+         (SELECT COALESCE(SUM(amount),0) FROM wallet_transactions
+          WHERE user_id = ?
+            AND type IN ('team_income','self_cashback','bonus','incentive','refund')
+            AND status = 'completed') AS total_income,
+         (SELECT COALESCE(SUM(amount),0) FROM wallet_transactions
+          WHERE user_id = ? AND type = 'team_income' AND status = 'completed') AS team_income_total,
+         (SELECT COALESCE(SUM(amount),0) FROM wallet_transactions
+          WHERE user_id = ? AND type = 'self_cashback' AND status = 'completed') AS cashback_total,
+         (SELECT COALESCE(SUM(CASE WHEN status != 'cancelled' THEN amount ELSE 0 END),0)
+          FROM orders WHERE user_id = ?) AS total_purchases,
+         (SELECT COUNT(*) FROM orders WHERE user_id = ? AND status != 'cancelled') AS order_count,
+         (SELECT COALESCE(SUM(CASE WHEN status = 'processed' THEN payout_amount ELSE 0 END),0)
+          FROM withdrawal_requests WHERE user_id = ?) AS total_withdrawn,
+         (SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests
+          WHERE user_id = ? AND status = 'pending') AS pending_withdrawal,
+         (SELECT COUNT(*) FROM users WHERE referred_by = ?) AS direct_count,
+         (SELECT COUNT(*) FROM users
+          WHERE referred_by = ? AND has_active_package = 1) AS active_directs`,
+      [userId, userId, userId, userId, userId, userId, userId, userId, userId, userId]
+    );
+
+    // Complete wallet ledger — every transaction, newest first
+    const [transactions] = await pool.execute(
+      `SELECT wt.*, su.name AS source_user_name, su.referral_code AS source_user_code,
+              o.order_number
+       FROM wallet_transactions wt
+       LEFT JOIN users su ON su.id = wt.source_user_id
+       LEFT JOIN orders o ON o.id = wt.order_id
+       WHERE wt.user_id = ?
+       ORDER BY wt.created_at DESC, wt.id DESC`,
+      [userId]
+    );
+
+    // All orders (purchases + auto repurchases)
+    const [orders] = await pool.execute(
+      `SELECT o.id, o.order_number, o.amount, o.status, o.payment_type,
+              COALESCE(o.order_source, 'user') AS order_source, o.created_at,
+              p.name AS product_name, p.rank_name
+       FROM orders o
+       LEFT JOIN products p ON p.id = o.product_id
+       WHERE o.user_id = ?
+       ORDER BY o.created_at DESC, o.id DESC`,
+      [userId]
+    );
+
+    // Team income this user RECEIVED (as upline), newest first
+    const [incomeEvents] = await pool.execute(
+      `SELECT tie.*, pu.name AS purchaser_name, pu.referral_code AS purchaser_code,
+              COALESCE(o.order_source, 'user') AS order_source
+       FROM team_income_events tie
+       JOIN users pu ON pu.id = tie.purchaser_id
+       LEFT JOIN orders o ON o.id = tie.order_id
+       WHERE tie.upline_id = ?
+       ORDER BY tie.created_at DESC, tie.id DESC`,
+      [userId]
+    );
+
+    // All withdrawal requests
+    const [withdrawals] = await pool.execute(
+      `SELECT * FROM withdrawal_requests WHERE user_id = ?
+       ORDER BY created_at DESC, id DESC`,
+      [userId]
+    );
+
+    // Level-wise downline (1 = directs), full tree + per-level counts
+    const [downline] = await pool.execute(
+      `WITH RECURSIVE tree AS (
+         SELECT id, name, email, mobile, referral_code, has_active_package,
+                rank_name, created_at, 1 AS level
+         FROM users WHERE referred_by = ?
+         UNION ALL
+         SELECT u.id, u.name, u.email, u.mobile, u.referral_code,
+                u.has_active_package, u.rank_name, u.created_at, t.level + 1
+         FROM users u JOIN tree t ON u.referred_by = t.id
+         WHERE t.level < 10
+       )
+       SELECT * FROM tree ORDER BY level ASC, created_at DESC`,
+      [userId]
+    );
+    const levelCounts = [];
+    for (const row of downline) {
+      const existing = levelCounts.find(l => l.level === row.level);
+      if (existing) {
+        existing.total += 1;
+        if (row.has_active_package) existing.active += 1;
+      } else {
+        levelCounts.push({
+          level: row.level,
+          total: 1,
+          active: row.has_active_package ? 1 : 0
+        });
+      }
+    }
+
+    res.json({
+      profile: {
+        ...profile,
+        wallet_balance: parseFloat(profile.balance) || 0,
+        earnings_balance: parseFloat(profile.earnings_balance) || 0,
+        repurchase_balance: parseFloat(profile.repurchase_balance) || 0,
+        product_price: parseFloat(profile.product_price) || 0
+      },
+      summary: {
+        total_deposits: parseFloat(summary.total_deposits) || 0,
+        total_income: parseFloat(summary.total_income) || 0,
+        team_income_total: parseFloat(summary.team_income_total) || 0,
+        cashback_total: parseFloat(summary.cashback_total) || 0,
+        total_purchases: parseFloat(summary.total_purchases) || 0,
+        order_count: parseInt(summary.order_count) || 0,
+        total_withdrawn: parseFloat(summary.total_withdrawn) || 0,
+        pending_withdrawal: parseFloat(summary.pending_withdrawal) || 0,
+        direct_count: parseInt(summary.direct_count) || 0,
+        active_directs: parseInt(summary.active_directs) || 0
+      },
+      transactions,
+      orders,
+      income_events: incomeEvents,
+      withdrawals,
+      downline,
+      level_counts: levelCounts
+    });
+  } catch (error) {
+    console.error('Get user detail report error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };

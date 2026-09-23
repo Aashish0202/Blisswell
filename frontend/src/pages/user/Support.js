@@ -78,8 +78,8 @@ const Support = () => {
   const getStatusBadge = (status) => {
     const styles = {
       open: { bg: '#FEF3C7', color: '#92400E' },
-      in_progress: { bg: '#DBEAFE', color: '#1E40AF' },
-      resolved: { bg: '#D1FAE5', color: '#065F46' },
+      in_progress: { bg: '#E3EDE4', color: '#073C39' },
+      resolved: { bg: '#E3EDE4', color: '#324540' },
       closed: { bg: '#F3F4F6', color: '#374151' }
     };
     const style = styles[status] || styles.open;

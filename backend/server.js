@@ -14,13 +14,22 @@ const adminRoutes = require('./routes/adminRoutes');
 const ticketRoutes = require('./routes/ticketRoutes');
 const galleryRoutes = require('./routes/galleryRoutes');
 const contactRoutes = require('./routes/contactRoutes');
+const withdrawalRoutes = require('./routes/withdrawalRoutes');
 const Settings = require('./models/Settings');
 
 // Import cron
-const { initDailyIncentiveCron } = require('./cron/dailyIncentiveCron');
 const { initExpireProcessingOrdersCron } = require('./cron/expireProcessingOrders');
+const { initAutoRepurchaseCron } = require('./cron/autoRepurchase');
+
+// Auto-migration (runs pending schema migrations before the server starts)
+const { runMigrationsIfStale } = require('./services/autoMigration');
 
 const app = express();
+
+// Behind the production reverse proxy (nginx) req.ip would otherwise be the
+// proxy's IP for every visitor — without this the rate limiter would count
+// ALL users against one shared bucket and 429 the whole site under load.
+app.set('trust proxy', 1);
 
 // Rate limiting
 const limiter = rateLimit({
@@ -34,8 +43,10 @@ const limiter = rateLimit({
 const allowedOrigins = [
   'https://blisswell.in',
   'http://localhost:3000',
+  'http://localhost:3001',
   'http://localhost:5000',
   'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
   'http://127.0.0.1:5000',
   process.env.FRONTEND_URL // Production URL from .env
 ].filter(Boolean);
@@ -44,6 +55,10 @@ app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
+    // Allow any localhost port in development (dev servers can land on 3002+, 5001+)
+    if (/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+      return callback(null, true);
+    }
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -86,6 +101,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/gallery', galleryRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/withdrawals', withdrawalRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -171,13 +187,26 @@ app.use((req, res) => {
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
 
-  // Initialize cron jobs
-  initDailyIncentiveCron();
-  initExpireProcessingOrdersCron();
-});
+// Run pending DB migrations first — refuse to serve requests against an
+// outdated schema (income/withdrawal routes would throw SQL errors).
+(async () => {
+  try {
+    await runMigrationsIfStale();
+  } catch (err) {
+    console.error('❌ Startup migration failed — server not started. Fix the database and reboot.');
+    console.error(err.message);
+    process.exit(1);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+
+    // Initialize cron jobs (daily-incentive cron retired with the salary model)
+    initExpireProcessingOrdersCron();
+    initAutoRepurchaseCron();
+  });
+})();
 
 module.exports = app;

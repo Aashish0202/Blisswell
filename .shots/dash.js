@@ -1,0 +1,24 @@
+const pw = require('C:/Users/vmcs/AppData/Local/npm-cache/_npx/e41f203b7505f1fb/node_modules/playwright');
+(async () => {
+  const browser = await pw.chromium.launch();
+  const ctx0 = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const p0 = await ctx0.newPage();
+  await p0.goto('http://localhost:3005/login', { waitUntil: 'networkidle' });
+  await p0.fill('input[name="user_id"], input[type="text"]', 'BSW443680');
+  await p0.fill('input[type="password"]', 'Test@1234');
+  await p0.click('button[type="submit"]');
+  await p0.waitForTimeout(2500);
+  const storage = await p0.evaluate(() => ({ token: localStorage.getItem('token'), user: localStorage.getItem('user') }));
+  await ctx0.close();
+  for (const [w, h, suffix] of [[1280, 800, 'desk'], [375, 812, 'mob']]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+    await ctx.addInitScript((s) => { localStorage.setItem('token', s.token); localStorage.setItem('user', s.user); }, storage);
+    const page = await ctx.newPage();
+    await page.goto('http://localhost:3005/dashboard', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(1200);
+    await page.screenshot({ path: `C:/blisswell_new/.shots/dashboard_${suffix}.png` });
+    console.log('ok', suffix);
+    await ctx.close();
+  }
+  await browser.close();
+})().catch(e => { console.error(e.message); process.exit(1); });

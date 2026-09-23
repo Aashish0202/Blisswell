@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { userAPI } from '../../utils/api';
 import { loadUser } from '../../redux/slices/authSlice';
@@ -10,12 +11,14 @@ const Profile = () => {
   const { user } = useSelector((state) => state.auth);
   const dispatch = useDispatch();
   const fileInputRef = useRef(null);
+  const location = useLocation();
 
   const [formData, setFormData] = useState({
     name: '',
     mobile: '',
     state: '',
     address: '',
+    pincode: '',
     pan_number: '',
     gst_number: ''
   });
@@ -31,7 +34,10 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const [kycLoading, setKycLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('profile');
+  // ?tab=kyc deep link (e.g. from the withdrawal page's KYC popup)
+  const [activeTab, setActiveTab] = useState(
+    new URLSearchParams(location.search).get('tab') === 'kyc' ? 'kyc' : 'profile'
+  );
   const [profileData, setProfileData] = useState(null);
   const [imageUploading, setImageUploading] = useState(false);
   const [profileImage, setProfileImage] = useState(null);
@@ -50,6 +56,7 @@ const Profile = () => {
         mobile: response.data.user.mobile || '',
         state: response.data.user.state || '',
         address: response.data.user.address || '',
+        pincode: response.data.user.pincode || '',
         pan_number: response.data.user.pan_number || '',
         gst_number: response.data.user.gst_number || ''
       });
@@ -144,7 +151,8 @@ const Profile = () => {
       // Only send fields that are editable (not locked by admin)
       const updateData = {
         state: formData.state,
-        address: formData.address
+        address: formData.address,
+        pincode: formData.pincode.trim()
       };
 
       // Only include name if it's not already set (not locked)
@@ -500,6 +508,22 @@ const Profile = () => {
                     placeholder="Enter your full address"
                     rows="3"
                     style={{ resize: 'vertical', minHeight: '80px' }}
+                  />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Pincode</label>
+                  <input
+                    type="text"
+                    name="pincode"
+                    className="form-input"
+                    value={formData.pincode}
+                    onChange={handleProfileChange}
+                    placeholder="6-digit pincode (e.g. 400001)"
+                    maxLength={6}
+                    inputMode="numeric"
                   />
                 </div>
               </div>
@@ -931,9 +955,9 @@ const Profile = () => {
           display: flex;
           align-items: center;
           gap: 0.5rem;
-          background: #ecfdf5;
-          border: 1px solid #d1fae5;
-          color: #065f46;
+          background: #F1F5F1;
+          border: 1px solid #E3EDE4;
+          color: #324540;
           padding: 1rem;
           border-radius: var(--radius-lg);
           margin-bottom: 1rem;
@@ -944,9 +968,9 @@ const Profile = () => {
           display: flex;
           align-items: flex-start;
           gap: 0.5rem;
-          background: #eff6ff;
-          border: 1px solid #bfdbfe;
-          color: #1e40af;
+          background: #F1F5F1;
+          border: 1px solid #C7DBCA;
+          color: #073C39;
           padding: 1rem;
           border-radius: var(--radius-lg);
           margin-bottom: 1rem;

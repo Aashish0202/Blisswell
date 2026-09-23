@@ -20,7 +20,7 @@ const SmartActionCard = ({
     pan_missing: {
       icon: '🪪',
       title: 'Complete Your Profile',
-      message: 'Add your PAN number to start earning. PAN verification is required before purchasing a package.',
+      message: 'Add your PAN number to start earning. PAN verification is required before purchasing a product.',
       variant: 'warning',
       defaultAction: { label: 'Add PAN', href: '/profile' }
     },
@@ -34,28 +34,28 @@ const SmartActionCard = ({
     pan_rejected: {
       icon: '⚠️',
       title: 'PAN Verification Failed',
-      message: 'Your PAN was rejected. Please update with correct details to proceed with package purchase.',
+      message: 'Your PAN was rejected. Please update with correct details to proceed with product purchase.',
       variant: 'danger',
       defaultAction: { label: 'Update PAN', href: '/profile' }
     },
     no_package: {
       icon: '📦',
       title: 'Activate Your Account',
-      message: 'Purchase a package to start earning referral salary. Your earning potential is waiting!',
+      message: 'Purchase a rank package to start earning level income. Your earning potential is waiting!',
       variant: 'primary',
-      defaultAction: { label: 'Purchase Package', href: '/orders' }
+      defaultAction: { label: 'Purchase Product', href: '/orders' }
     },
     low_balance: {
       icon: '💰',
       title: 'Low Wallet Balance',
-      message: 'Add funds to your wallet to purchase packages and activate your earning potential.',
+      message: 'Add funds to your wallet to purchase products and activate your earning potential.',
       variant: 'warning',
       defaultAction: { label: 'Add Funds', href: '/wallet' }
     },
     no_referrals: {
       icon: '👥',
       title: 'Grow Your Team',
-      message: 'Share your referral link with friends and earn ₹100/month for each active referral!',
+      message: 'Share your referral link with friends and earn Team Income across 10 levels per rank for each active referral!',
       variant: 'success',
       defaultAction: { label: 'Get Referral Link', href: '/referrals' }
     },
@@ -69,9 +69,9 @@ const SmartActionCard = ({
     earnings_available: {
       icon: '💸',
       title: 'Earnings Available',
-      message: 'You have pending incentive payouts! Check your incentive section for details.',
+      message: 'You have earnings available! Check your Earnings section to request a withdrawal.',
       variant: 'success',
-      defaultAction: { label: 'View Salary', href: '/salary' }
+      defaultAction: { label: 'View Earnings', href: '/earnings' }
     }
   };
 
@@ -265,7 +265,7 @@ export const getSmartCards = (user, wallet, referrals) => {
     // Package status check
     if (!user.has_active_package) {
       const balance = parseFloat(wallet?.balance) || 0;
-      const packagePrice = 2100; // Default package price
+      const packagePrice = 599; // Door Mat product price
       if (balance < packagePrice) {
         cards.push({ type: 'low_balance', priority: 2 });
       } else {

@@ -14,6 +14,7 @@ const Register = () => {
     mobile: '',
     state: 'Maharashtra',
     address: '',
+    pincode: '',
     pan_number: '',
     password: '',
     confirmPassword: '',
@@ -21,6 +22,8 @@ const Register = () => {
     terms_accepted: false
   });
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [registeredUser, setRegisteredUser] = useState(null);
   const [termsContent, setTermsContent] = useState('');
@@ -188,6 +191,11 @@ const Register = () => {
       toast.error('Address is required');
       return false;
     }
+    const pincodeRegex = /^[1-9]\d{5}$/;
+    if (!pincodeRegex.test(formData.pincode.trim())) {
+      toast.error('Invalid pincode. Enter a valid 6-digit pincode');
+      return false;
+    }
     if (!formData.terms_accepted) {
       toast.error('You must accept the terms and conditions');
       return false;
@@ -209,6 +217,7 @@ const Register = () => {
         mobile: formData.mobile,
         state: formData.state,
         address: formData.address,
+        pincode: formData.pincode.trim(),
         pan_number: formData.pan_number.toUpperCase(),
         password: formData.password,
         ref: formData.ref,
@@ -336,9 +345,24 @@ const Register = () => {
               className="form-input"
               value={formData.address}
               onChange={handleChange}
-              placeholder="Enter your full address (house no, street, city, pincode)"
+              placeholder="Enter your full address (house no, street, city)"
               rows="3"
               style={{ resize: 'vertical', minHeight: '80px' }}
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Pincode <span style={{ color: '#ef4444' }}>*</span></label>
+            <input
+              type="text"
+              name="pincode"
+              className="form-input"
+              value={formData.pincode}
+              onChange={handleChange}
+              placeholder="6-digit pincode (e.g. 400001)"
+              maxLength={6}
+              inputMode="numeric"
               required
             />
           </div>
@@ -381,26 +405,48 @@ const Register = () => {
 
           <div className="form-group">
             <label className="form-label">Password</label>
-            <input
-              type="password"
-              name="password"
-              className="form-input"
-              value={formData.password}
-              onChange={handleChange}
-              required
-            />
+            <div className="password-input-wrapper">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                name="password"
+                className="form-input"
+                value={formData.password}
+                onChange={handleChange}
+                required
+              />
+              <button
+                type="button"
+                className="password-toggle-btn"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex="-1"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? '👁️' : '👁️‍🗨️'}
+              </button>
+            </div>
           </div>
 
           <div className="form-group">
             <label className="form-label">Confirm Password</label>
-            <input
-              type="password"
-              name="confirmPassword"
-              className="form-input"
-              value={formData.confirmPassword}
-              onChange={handleChange}
-              required
-            />
+            <div className="password-input-wrapper">
+              <input
+                type={showConfirmPassword ? 'text' : 'password'}
+                name="confirmPassword"
+                className="form-input"
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                required
+              />
+              <button
+                type="button"
+                className="password-toggle-btn"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                tabIndex="-1"
+                aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
+              >
+                {showConfirmPassword ? '👁️' : '👁️‍🗨️'}
+              </button>
+            </div>
           </div>
 
           <div className="form-group">
@@ -466,7 +512,7 @@ const Register = () => {
 
         <p style={{ textAlign: 'center', marginTop: '1rem', color: '#6b7280' }}>
           Already have an account?{' '}
-          <Link to="/login" style={{ color: '#6366f1' }}>
+          <Link to="/login" style={{ color: '#CFAA57' }}>
             Login
           </Link>
         </p>
@@ -564,6 +610,33 @@ const Register = () => {
           max-width: 450px;
           width: 100%;
           padding: 2rem;
+        }
+
+        /* Password show/hide toggle (same pattern as Login/ResetPassword) */
+        .password-input-wrapper {
+          position: relative;
+        }
+
+        .password-input-wrapper .form-input {
+          padding-right: 45px;
+        }
+
+        .password-toggle-btn {
+          position: absolute;
+          right: 10px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 5px;
+          font-size: 1.1rem;
+          opacity: 0.7;
+          transition: opacity 0.2s;
+        }
+
+        .password-toggle-btn:hover {
+          opacity: 1;
         }
 
         .auth-logo {

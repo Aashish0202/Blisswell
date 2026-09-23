@@ -3,11 +3,11 @@ const pool = require('../config/db');
 const User = {
   // Create new user
   async create(userData) {
-    const { name, email, mobile, state, address, password, pan_number, referral_code, referred_by } = userData;
+    const { name, email, mobile, state, address, pincode, password, pan_number, referral_code, referred_by } = userData;
     const [result] = await pool.execute(
-      `INSERT INTO users (name, email, mobile, state, address, password, pan_number, referral_code, referred_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [name, email, mobile, state || null, address || null, password, pan_number, referral_code, referred_by || null]
+      `INSERT INTO users (name, email, mobile, state, address, pincode, password, pan_number, referral_code, referred_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, email, mobile, state || null, address || null, pincode || null, password, pan_number, referral_code, referred_by || null]
     );
     return result.insertId;
   },
@@ -73,8 +73,8 @@ const User = {
       params.push(filters.pan_status);
     }
     if (filters.search) {
-      query += ' AND (name LIKE ? OR email LIKE ? OR mobile LIKE ?)';
-      params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
+      query += ' AND (name LIKE ? OR email LIKE ? OR mobile LIKE ? OR referral_code LIKE ?)';
+      params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
     }
 
     query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
@@ -204,7 +204,8 @@ const User = {
     return rows;
   },
 
-  // Get referrals with bonus earned from each
+  // Get referrals with purchase info (direct referrals, paginated).
+  // bonus_received removed (Business Bonus feature deleted).
   async getReferralsWithBonus(userId, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     const [rows] = await pool.execute(
@@ -216,19 +217,69 @@ const User = {
         u.has_active_package,
         u.created_at,
         COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as total_purchase,
-        (SELECT COALESCE(SUM(sp.amount), 0)
-         FROM salary_payouts sp
-         JOIN salary_cycles sc ON sp.cycle_id = sc.id
-         WHERE sc.sponsor_id = ? AND sc.referral_id = u.id AND sp.status = 'paid') as bonus_received
+        0 as bonus_received
        FROM users u
        LEFT JOIN orders o ON u.id = o.user_id
        WHERE u.referred_by = ?
        GROUP BY u.id
        ORDER BY u.created_at DESC
        LIMIT ? OFFSET ?`,
-      [userId, userId, limit, offset]
+      [userId, limit, offset]
     );
     return rows;
+  },
+
+  // Full 10-level downline tree (Team Income depth), with optional level
+  // filter and name/email/mobile/referral_code search. Walks the
+  // referred_by chain via a recursive CTE — MariaDB 10.2+ supports this.
+  async getDownline(userId, { page = 1, limit = 20, level = null, search = '' } = {}) {
+    const offset = (page - 1) * limit;
+    const params = [userId];
+    let where = '1=1';
+
+    if (level) {
+      where += ' AND level = ?';
+      params.push(level);
+    }
+    if (search) {
+      where += ' AND (name LIKE ? OR email LIKE ? OR mobile LIKE ? OR referral_code LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    const cte = `
+      WITH RECURSIVE downline AS (
+        SELECT id, name, email, mobile, referral_code, has_active_package,
+               rank_name, referred_by, created_at, 1 AS level
+        FROM users WHERE referred_by = ?
+        UNION ALL
+        SELECT u.id, u.name, u.email, u.mobile, u.referral_code, u.has_active_package,
+               u.rank_name, u.referred_by, u.created_at, d.level + 1
+        FROM users u
+        JOIN downline d ON u.referred_by = d.id
+        WHERE d.level < 10
+      )
+    `;
+
+    const [rows] = await pool.execute(
+      `${cte} SELECT * FROM downline WHERE ${where}
+       ORDER BY level ASC, created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+
+    const [[{ total }]] = await pool.execute(
+      `${cte} SELECT COUNT(*) AS total FROM downline WHERE ${where}`,
+      params
+    );
+
+    const [levelCounts] = await pool.execute(
+      `${cte} SELECT level, COUNT(*) AS count,
+              SUM(CASE WHEN has_active_package = 1 THEN 1 ELSE 0 END) AS active_count
+       FROM downline GROUP BY level ORDER BY level ASC`,
+      [userId]
+    );
+
+    return { rows, total: parseInt(total, 10) || 0, levelCounts };
   },
 
   // Count total referrals (for pagination)
@@ -241,27 +292,51 @@ const User = {
   },
 
   // Aggregated referral stats for the logged-in sponsor (used by the Referrals
-  // page stat cards — correct across ALL referrals, not just the current page)
+  // page stat cards — correct across ALL referrals, not just the current page).
+  // bonus_received replaced with qualified-direct count + team-income total.
   async getReferralSummary(userId) {
     const [rows] = await pool.execute(
       `SELECT
         COUNT(u.id) as total_referrals,
         SUM(CASE WHEN u.has_active_package = 1 THEN 1 ELSE 0 END) as active_referrals,
-        COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as total_direct_business,
-        COALESCE((SELECT SUM(sp.amount) FROM salary_payouts sp
-                  JOIN salary_cycles sc ON sp.cycle_id = sc.id
-                  WHERE sc.sponsor_id = ? AND sp.status = 'paid'), 0) as total_bonus_received
+        COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as total_direct_business
        FROM users u
        LEFT JOIN orders o ON u.id = o.user_id
        WHERE u.referred_by = ?`,
-      [userId, userId]
+      [userId]
     );
     const r = rows[0] || {};
+
+    const [ti] = await pool.execute(
+      `SELECT COALESCE(SUM(amount), 0) as total FROM team_income_events WHERE upline_id = ?`,
+      [userId]
+    );
+    const totalTeamIncome = parseFloat(ti[0].total) || 0;
+
+    // Total business across the full 10-level downline (not just directs) —
+    // every purchase/repurchase order placed by anyone in the tree.
+    const [[tb]] = await pool.execute(
+      `WITH RECURSIVE downline AS (
+        SELECT id, 1 AS level FROM users WHERE referred_by = ?
+        UNION ALL
+        SELECT u.id, d.level + 1 FROM users u
+        JOIN downline d ON u.referred_by = d.id
+        WHERE d.level < 10
+      )
+      SELECT COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as total
+      FROM downline d
+      LEFT JOIN orders o ON o.user_id = d.id`,
+      [userId]
+    );
+    const totalTeamBusiness = parseFloat(tb.total) || 0;
+
     return {
       total_referrals: parseInt(r.total_referrals) || 0,
       active_referrals: parseInt(r.active_referrals) || 0,
       total_direct_business: parseFloat(r.total_direct_business) || 0,
-      total_bonus_received: parseFloat(r.total_bonus_received) || 0
+      total_team_business: totalTeamBusiness,
+      total_team_income: totalTeamIncome,
+      total_bonus_received: 0
     };
   },
 
@@ -303,6 +378,86 @@ const User = {
       [`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`]
     );
     return rows;
+  },
+
+  // -------------------------------------------------------------------
+  // Team Income support — upline walk + qualified directs
+  // -------------------------------------------------------------------
+
+  // Walk up the referral chain via referred_by, returning upline users
+  // ordered by level (1 = direct sponsor, 2 = sponsor's sponsor, ...).
+  // maxDepth defaults to 10 (the Team Income level cap). Cycle-guarded.
+  async getUpline(userId, maxDepth = 10, connection = pool) {
+    const conn = connection;
+    const upline = [];
+    const visited = new Set([parseInt(userId, 10)]);
+
+    // Seed with the purchaser's own sponsor pointer — one query to start the
+    // walk, then exactly one query per level (the parent row itself carries
+    // its referred_by pointer for the next hop).
+    const [startRows] = await conn.execute(
+      'SELECT referred_by FROM users WHERE id = ?',
+      [userId]
+    );
+    let current = startRows[0] ? parseInt(startRows[0].referred_by, 10) : NaN;
+
+    for (let level = 1; level <= maxDepth; level++) {
+      if (!current || visited.has(current)) break; // end of chain / cycle guard
+      visited.add(current);
+      const [parent] = await conn.execute(
+        `SELECT id, referred_by, name, email, referral_code, has_active_package FROM users WHERE id = ?`,
+        [current]
+      );
+      if (!parent[0]) break;
+      upline.push({ level, ...parent[0] });
+      current = parent[0].referred_by != null ? parseInt(parent[0].referred_by, 10) : NaN;
+    }
+    return upline;
+  },
+
+  // Count a user's qualified directs (active package = 1).
+  // Connection-aware so it sees the in-transaction purchaser.
+  async countQualifiedDirects(userId, connection = pool) {
+    const conn = connection;
+    const [rows] = await conn.execute(
+      `SELECT COUNT(*) as count FROM users
+       WHERE referred_by = ? AND has_active_package = 1`,
+      [userId]
+    );
+    return parseInt(rows[0].count, 10) || 0;
+  },
+
+  // A user is "qualified" themselves when they have an active package.
+  async isQualified(userId, connection = pool) {
+    const conn = connection;
+    const [rows] = await conn.execute(
+      `SELECT has_active_package FROM users WHERE id = ?`,
+      [userId]
+    );
+    return Boolean(rows[0]?.has_active_package);
+  },
+
+  // Set the user's rank + current product (initial purchase or auto upgrade).
+  // Connection-aware so it runs inside purchase/repurchase transactions.
+  async updateRank(userId, { rank_name, product_id }, connection = pool) {
+    const conn = connection;
+    const [result] = await conn.execute(
+      `UPDATE users SET rank_name = ?, current_product_id = ?, updated_at = NOW() WHERE id = ?`,
+      [rank_name || null, product_id || null, userId]
+    );
+    return result.affectedRows > 0;
+  },
+
+  // The user's current rank product (join for rank/price/level table).
+  async getCurrentProduct(userId, connection = pool) {
+    const conn = connection;
+    const [rows] = await conn.execute(
+      `SELECT p.* FROM users u
+       JOIN products p ON p.id = u.current_product_id
+       WHERE u.id = ?`,
+      [userId]
+    );
+    return rows[0] || null;
   }
 };
 

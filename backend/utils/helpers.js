@@ -51,11 +51,20 @@ const generateOrderNumber = () => {
   return `ORD${timestamp}${random}`;
 };
 
-// Generate invoice number with new format: BSW + 1000000 + userId
-// Format: BSW100000001 (BSW + 1000000 + userId padded to 2 digits)
-const generateInvoiceNumber = async (connection, userId) => {
-  const paddedUserId = userId.toString().padStart(2, '0');
-  return `BSW1000000${paddedUserId}`;
+// Allocate the next sequential invoice number: BSW + 1000000 + running seq
+// (BSW1000001, BSW1000002, ...). MUST be called inside the transaction that
+// CONFIRMS the payment — the counter row is locked FOR UPDATE so concurrent
+// confirmations stay strictly sequential, and the allocation rolls back with
+// the payment if it fails. Never call this for pending/failed payments.
+const allocateInvoiceNumber = async (connection) => {
+  const [rows] = await connection.execute(
+    'SELECT next_seq FROM invoice_counter WHERE id = 1 FOR UPDATE'
+  );
+  const seq = rows[0].next_seq;
+  await connection.execute(
+    'UPDATE invoice_counter SET next_seq = next_seq + 1 WHERE id = 1'
+  );
+  return `BSW${1000000 + seq}`;
 };
 
 // Calculate pagination
@@ -92,7 +101,7 @@ module.exports = {
   validatePAN,
   validateMobile,
   generateOrderNumber,
-  generateInvoiceNumber, //here
+  allocateInvoiceNumber,
   calculatePagination,
   formatDate
 };

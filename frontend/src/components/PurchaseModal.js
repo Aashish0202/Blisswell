@@ -4,12 +4,63 @@ import { orderAPI } from '../utils/api';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
+// Extract YouTube video ID from various URL formats
+const getYouTubeId = (url) => {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtube\.com\/watch\?.+&v=)([a-zA-Z0-9_-]{11})/,
+    /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+};
+
 const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState('confirm'); // 'confirm' | 'processing' | 'success' | 'failed' | 'cancelled'
   const [razorpayLoaded, setRazorpayLoaded] = useState(false);
   const [, setCurrentOrderId] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [selectedDesignIdx, setSelectedDesignIdx] = useState(0);
+  const [designImageIdx, setDesignImageIdx] = useState(0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [designVideoOpen, setDesignVideoOpen] = useState(false);
+  // One-time purchase rule + post-purchase next-upgrade popup
+  const [alreadyOwned, setAlreadyOwned] = useState(false);
+  const [nextUpgrade, setNextUpgrade] = useState(null);
+
+  const designs = (product && Array.isArray(product.designs)) ? product.designs : [];
+  const selectedDesign = designs[selectedDesignIdx] || null;
+
+  // Reset the design selection whenever the modal opens or the product
+  // changes, so a stale selection never leaks between purchases. Also gate
+  // the confirm step for users who already own a package (one-time rule).
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedDesignIdx(0);
+      setDesignImageIdx(0);
+      setLightboxOpen(false);
+      setDesignVideoOpen(false);
+      setNextUpgrade(null);
+      try {
+        const u = JSON.parse(localStorage.getItem('user') || 'null');
+        setAlreadyOwned(!!(u && u.has_active_package));
+      } catch (e) {
+        setAlreadyOwned(false);
+      }
+    }
+  }, [isOpen, product?.id]);
+
+  const selectDesign = (idx) => {
+    setSelectedDesignIdx(idx);
+    setDesignImageIdx(0);
+    setDesignVideoOpen(false);
+  };
 
   console.log('PurchaseModal render:', { isOpen, product: product?.name, razorpayLoaded });
 
@@ -85,8 +136,12 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
     try {
       console.log('Creating Razorpay order for product:', product.id);
 
-      // Step 1: Create Razorpay order
-      const orderResponse = await orderAPI.createPaymentOrder(product.id);
+      // Step 1: Create Razorpay order (design is validated server-side and
+      // stored on the 'processing' order)
+      const orderResponse = await orderAPI.createPaymentOrder(
+        product.id,
+        selectedDesign ? selectedDesign.name : null
+      );
       console.log('Razorpay order created:', orderResponse.data);
 
       const razorpayOrderId = orderResponse.data.order_id;
@@ -99,7 +154,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
         currency: orderResponse.data.currency,
         order_id: razorpayOrderId,
         name: 'Blisswell',
-        description: `Purchase: ${product.name}`,
+        description: `Purchase: ${product.name}${selectedDesign ? ` (${selectedDesign.name})` : ''}`,
         handler: async (response) => {
           console.log('Razorpay payment response:', response);
           try {
@@ -108,18 +163,35 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
-              product_id: product.id
+              product_id: product.id,
+              design_name: selectedDesign ? selectedDesign.name : null
             });
 
             console.log('Payment verified:', verifyResponse.data);
+            setNextUpgrade(verifyResponse.data.nextUpgrade || null);
             setStep('success');
             toast.success('Purchase successful!');
 
-            // Redirect to orders page after 2 seconds
-            setTimeout(() => {
-              onSuccess && onSuccess(verifyResponse.data);
-              onClose();
-            }, 2000);
+            // Keep the locally cached user in sync so one-time-purchase
+            // gating reflects immediately (no refresh needed).
+            try {
+              const u = JSON.parse(localStorage.getItem('user') || 'null');
+              if (u) {
+                u.has_active_package = true;
+                if (product.rank_name) u.rank_name = product.rank_name;
+                localStorage.setItem('user', JSON.stringify(u));
+              }
+            } catch (e) { /* ignore */ }
+
+            // Redirect to orders page after 2 seconds — unless the
+            // next-upgrade popup is shown, which holds until dismissed.
+            const upgrade = verifyResponse.data.nextUpgrade;
+            if (!upgrade || upgrade.at_top_rank) {
+              setTimeout(() => {
+                onSuccess && onSuccess(verifyResponse.data);
+                onClose();
+              }, 2000);
+            }
 
           } catch (verifyError) {
             console.error('Payment verification failed:', verifyError);
@@ -139,7 +211,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
           contact: ''
         },
         theme: {
-          color: '#2563eb'
+          color: '#073C39'
         },
         modal: {
           ondismiss: async () => {
@@ -174,6 +246,8 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
     setStep('confirm');
     setErrorMessage('');
     setCurrentOrderId(null);
+    setLightboxOpen(false);
+    setDesignVideoOpen(false);
     onClose();
   };
 
@@ -183,10 +257,46 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
     return parseFloat(price).toLocaleString('en-IN');
   };
 
+  // Resolve the image shown in the preview: the selected design's image if a
+  // design with images is picked, otherwise the product's default image.
+  const designImages = selectedDesign ? (selectedDesign.images || []) : [];
+  const previewImage = designImages[designImageIdx] || designImages[0] || product.image;
+  const resolveImageUrl = (img) => {
+    if (!img) return null;
+    return img.startsWith('http') ? img : `${API_URL.replace('/api', '')}${img}`;
+  };
+
   return (
+    <>
     <div className="modal-overlay" onClick={handleClose}>
       <div className="modal-content purchase-modal" onClick={(e) => e.stopPropagation()}>
-        {step === 'confirm' && (
+        {step === 'confirm' && alreadyOwned && (
+          <>
+            <div className="modal-header">
+              <h2>Package Already Owned</h2>
+              <button className="close-btn" onClick={handleClose}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="owned-notice">
+                <div className="owned-notice-icon">🔒</div>
+                <h3>One-time purchase only</h3>
+                <p>
+                  You already own a package, so you can't purchase again. Your next higher
+                  rank is bought <strong>automatically</strong> from your Repurchase Wallet
+                  as soon as the balance reaches that rank's price.
+                </p>
+                <p className="owned-notice-sub">
+                  Every withdrawal adds 20% to your Repurchase Wallet to fund the upgrade.
+                </p>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={handleClose}>Got it</button>
+            </div>
+          </>
+        )}
+
+        {step === 'confirm' && !alreadyOwned && (
           <>
             <div className="modal-header">
               <h2>Confirm Purchase</h2>
@@ -196,10 +306,10 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
             <div className="modal-body">
               <div className="product-summary">
                 <div className="product-image-preview">
-                  {product.image ? (
+                  {previewImage ? (
                     <img
-                      src={`${API_URL.replace('/api', '')}${product.image}`}
-                      alt={product.name}
+                      src={resolveImageUrl(previewImage)}
+                      alt={selectedDesign ? `${product.name} - ${selectedDesign.name}` : product.name}
                     />
                   ) : (
                     <div className="product-placeholder">🛏️</div>
@@ -207,27 +317,93 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
                 </div>
                 <div className="product-details">
                   <h3>{product.name}</h3>
-                  {product.description && (
-                    <p className="product-description">{product.description}</p>
+                  {selectedDesign ? (
+                    <p className="product-description">{selectedDesign.description || product.description}</p>
+                  ) : (
+                    product.description && <p className="product-description">{product.description}</p>
                   )}
                   <div className="price-info">
                     <span className="price-label">Total Amount</span>
                     <span className="price-value">₹{formatPrice(product.price)}</span>
+                    {product.rank_name && (
+                      <span className="rank-chip">★ {product.rank_name} Rank</span>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {(product.daily_amount || product.salary_amount) && (product.days || product.salary_duration) && (
-                <div className="earning-info">
-                  <div className="earning-badge">
-                    <span className="earning-icon">💰</span>
-                    <div className="earning-text">
-                      <span className="earning-label">Your Referral Earnings</span>
-                      <span className="earning-amount">₹{formatPrice(product.daily_amount || product.salary_amount)}/day for {product.days || product.salary_duration} days</span>
-                    </div>
+              {designs.length > 0 && (
+                <div className="design-selector">
+                  <div className="design-tabs">
+                    {designs.map((d, idx) => (
+                      <button
+                        key={`${d.name}-${idx}`}
+                        type="button"
+                        className={`design-tab${idx === selectedDesignIdx ? ' active' : ''}`}
+                        onClick={() => selectDesign(idx)}
+                      >
+                        {d.name}
+                      </button>
+                    ))}
                   </div>
+
+                  {designImages.length > 0 && (
+                    <>
+                      <div
+                        className="design-main-image"
+                        onClick={() => setLightboxOpen(true)}
+                        title="Click to view full size"
+                      >
+                        <img
+                          src={resolveImageUrl(designImages[designImageIdx] || designImages[0])}
+                          alt={`${product.name} - ${selectedDesign.name}`}
+                        />
+                        <span className="design-zoom-hint">&#128269; Click to enlarge</span>
+                      </div>
+                      {designImages.length > 1 && (
+                        <div className="design-images">
+                          {designImages.map((img, idx) => (
+                            <button
+                              key={`${img}-${idx}`}
+                              type="button"
+                              className={`design-thumb${idx === designImageIdx ? ' active' : ''}`}
+                              onClick={() => setDesignImageIdx(idx)}
+                            >
+                              <img src={resolveImageUrl(img)} alt={`${selectedDesign.name} ${idx + 1}`} />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  <div className="design-selected-name">
+                    Selected: <strong>{selectedDesign.name}</strong>
+                  </div>
+
+                  {selectedDesign.video_link && (
+                    <button
+                      type="button"
+                      className="design-video-btn"
+                      onClick={() => setDesignVideoOpen(true)}
+                    >
+                      ▶ Watch {selectedDesign.name} Video
+                    </button>
+                  )}
                 </div>
               )}
+
+              <div className="earning-info">
+                <div className="earning-badge">
+                  <span className="earning-icon">💰</span>
+                  <div className="earning-text">
+                    <span className="earning-label">Your Earnings</span>
+                    <span className="earning-amount">
+                      Level Income{product.rank_name ? ` per ${product.rank_name} rank table (10 levels)` : ' (10 levels per rank)'} for your upline
+                    </span>
+                  </div>
+                </div>
+              </div>
 
               <div className="payment-note">
                 <p>Payment will be processed securely via Razorpay</p>
@@ -257,7 +433,55 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
             <div className="success-icon">✓</div>
             <h3>Purchase Successful!</h3>
             <p>Your order has been placed successfully.</p>
-            <p className="redirect-note">Redirecting to your orders...</p>
+
+            {nextUpgrade && !nextUpgrade.at_top_rank && (
+              <div className="next-upgrade-card">
+                <div className="next-upgrade-head">
+                  <span className="next-upgrade-icon">🚀</span>
+                  <div>
+                    <span className="next-upgrade-title">Next Auto Upgrade: {nextUpgrade.next_rank_name} — ₹{formatPrice(nextUpgrade.next_price)}</span>
+                    <span className="next-upgrade-sub">No second purchase needed — this buys itself</span>
+                  </div>
+                </div>
+                <div className="next-upgrade-bar">
+                  <div
+                    className="next-upgrade-fill"
+                    style={{ width: `${Math.min(100, Math.round(nextUpgrade.progress || 0))}%` }}
+                  ></div>
+                </div>
+                <p className="next-upgrade-note">
+                  {nextUpgrade.shortfall > 0
+                    ? <>Repurchase Wallet: <strong>₹{formatPrice(nextUpgrade.repurchase_balance)}</strong> · need <strong>₹{formatPrice(nextUpgrade.shortfall)}</strong> more to auto-trigger. Every withdrawal adds 20% automatically.</>
+                    : <>Repurchase Wallet is ready — your upgrade will trigger automatically on the next engine run.</>}
+                </p>
+              </div>
+            )}
+            {nextUpgrade && nextUpgrade.at_top_rank && (
+              <div className="next-upgrade-card top">
+                <div className="next-upgrade-head">
+                  <span className="next-upgrade-icon">🏆</span>
+                  <div>
+                    <span className="next-upgrade-title">Top rank reached!</span>
+                    <span className="next-upgrade-sub">Your repurchase balance keeps accumulating for future higher packages.</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(!nextUpgrade || nextUpgrade.at_top_rank) && (
+              <p className="redirect-note">Redirecting to your orders...</p>
+            )}
+            {nextUpgrade && !nextUpgrade.at_top_rank && (
+              <button
+                className="btn btn-primary next-upgrade-btn"
+                onClick={() => {
+                  onSuccess && onSuccess({ success: true });
+                  onClose();
+                }}
+              >
+                Got it
+              </button>
+            )}
           </div>
         )}
 
@@ -375,7 +599,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+          background: linear-gradient(135deg, #E3EDE4, #C7DBCA);
           font-size: 2rem;
         }
 
@@ -412,11 +636,288 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
         .price-value {
           font-size: 1.25rem;
           font-weight: 700;
-          color: #2563eb;
+          color: #073C39;
+        }
+
+        .rank-chip {
+          display: inline-block;
+          margin-top: 0.25rem;
+          padding: 0.2rem 0.5rem;
+          background: #fef3c7;
+          color: #b45309;
+          border-radius: 999px;
+          font-size: 0.7rem;
+          font-weight: 600;
+          width: fit-content;
         }
 
         .earning-info {
           margin-bottom: 1rem;
+        }
+
+        .design-selector {
+          margin-bottom: 1rem;
+          padding: 1rem;
+          background: #f9fafb;
+          border-radius: 12px;
+        }
+
+        .design-tabs {
+          display: flex;
+          gap: 0.5rem;
+          flex-wrap: wrap;
+        }
+
+        .design-tab {
+          padding: 0.5rem 0.9rem;
+          border: 1px solid #d1d5db;
+          background: white;
+          color: #374151;
+          border-radius: 8px;
+          font-size: 0.875rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .design-tab:hover {
+          border-color: #073C39;
+          color: #073C39;
+        }
+
+        .design-tab.active {
+          background: #073C39;
+          border-color: #073C39;
+          color: white;
+        }
+
+        .design-main-image {
+          position: relative;
+          margin-top: 0.75rem;
+          width: 100%;
+          height: 320px;
+          border-radius: 10px;
+          overflow: hidden;
+          background: #fff;
+          border: 1px solid #e5e7eb;
+          cursor: zoom-in;
+        }
+
+        .design-main-image img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          background: #fff;
+        }
+
+        .design-zoom-hint {
+          position: absolute;
+          right: 10px;
+          bottom: 10px;
+          padding: 0.3rem 0.7rem;
+          background: rgba(0, 0, 0, 0.55);
+          color: white;
+          font-size: 0.75rem;
+          font-weight: 500;
+          border-radius: 999px;
+          pointer-events: none;
+        }
+
+        .design-images {
+          display: flex;
+          gap: 0.5rem;
+          margin-top: 0.6rem;
+          overflow-x: auto;
+          padding-bottom: 0.25rem;
+        }
+
+        .design-thumb {
+          width: 72px;
+          height: 72px;
+          border-radius: 8px;
+          overflow: hidden;
+          border: 2px solid transparent;
+          padding: 0;
+          cursor: pointer;
+          background: white;
+          flex-shrink: 0;
+        }
+
+        .design-thumb.active {
+          border-color: #073C39;
+        }
+
+        .design-thumb img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+
+        .design-selected-name {
+          margin-top: 0.6rem;
+          font-size: 0.8rem;
+          color: #6b7280;
+        }
+
+        .design-selected-name strong {
+          color: #111827;
+        }
+
+        .design-video-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.4rem;
+          width: 100%;
+          margin-top: 0.5rem;
+          padding: 0.5rem 0.75rem;
+          background: white;
+          border: 1px solid #dc2626;
+          border-radius: 8px;
+          color: #dc2626;
+          font-size: 0.8125rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .design-video-btn:hover {
+          background: #dc2626;
+          color: white;
+        }
+
+        .design-video-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.85);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2100;
+          padding: 1rem;
+        }
+
+        .design-video-box {
+          position: relative;
+          background: white;
+          border-radius: 12px;
+          width: 100%;
+          max-width: 720px;
+          overflow: hidden;
+        }
+
+        .design-video-close {
+          position: absolute;
+          top: 8px;
+          right: 12px;
+          background: rgba(0, 0, 0, 0.6);
+          border: none;
+          color: white;
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          font-size: 1.3rem;
+          cursor: pointer;
+          z-index: 10;
+        }
+
+        .design-video-frame {
+          position: relative;
+          padding-top: 56.25%;
+          background: #000;
+        }
+
+        .design-video-frame iframe {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          border: none;
+        }
+
+        .design-lightbox-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.9);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2000;
+          padding: 2.5rem 1rem 4rem;
+        }
+
+        .design-lightbox-image {
+          max-width: 100%;
+          max-height: 100%;
+          object-fit: contain;
+          border-radius: 8px;
+        }
+
+        .design-lightbox-close {
+          position: absolute;
+          top: 16px;
+          right: 20px;
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          font-size: 1.6rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .design-lightbox-close:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .design-lightbox-nav {
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          background: rgba(255, 255, 255, 0.2);
+          border: none;
+          color: white;
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          font-size: 1.6rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .design-lightbox-nav:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .design-lightbox-prev {
+          left: 12px;
+        }
+
+        .design-lightbox-next {
+          right: 12px;
+        }
+
+        .design-lightbox-caption {
+          position: absolute;
+          bottom: 18px;
+          left: 50%;
+          transform: translateX(-50%);
+          color: white;
+          font-size: 0.85rem;
+          font-weight: 500;
         }
 
         .earning-badge {
@@ -424,7 +925,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
           align-items: center;
           gap: 0.75rem;
           padding: 0.75rem 1rem;
-          background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+          background: linear-gradient(135deg, #E3EDE4, #C7DBCA);
           border-radius: 12px;
         }
 
@@ -439,13 +940,13 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
 
         .earning-label {
           font-size: 0.75rem;
-          color: #047857;
+          color: #40584E;
         }
 
         .earning-amount {
           font-size: 0.875rem;
           font-weight: 600;
-          color: #047857;
+          color: #40584E;
         }
 
         .payment-note {
@@ -489,13 +990,13 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
         }
 
         .btn-primary {
-          background: #2563eb;
+          background: #073C39;
           border: none;
           color: white;
         }
 
         .btn-primary:hover {
-          background: #1d4ed8;
+          background: #0B4541;
         }
 
         .btn:disabled {
@@ -516,7 +1017,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
           width: 48px;
           height: 48px;
           border: 4px solid #e5e7eb;
-          border-top-color: #2563eb;
+          border-top-color: #073C39;
           border-radius: 50%;
           animation: spin 1s linear infinite;
           margin-bottom: 1rem;
@@ -529,7 +1030,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
         .success-icon {
           width: 64px;
           height: 64px;
-          background: #10b981;
+          background: #5D8172;
           color: white;
           border-radius: 50%;
           display: flex;
@@ -554,7 +1055,90 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
 
         .success-state h3 {
           margin: 0 0 0.5rem 0;
-          color: #047857;
+          color: #40584E;
+        }
+
+        /* One-time purchase notice (already owns a package) */
+        .owned-notice {
+          text-align: center;
+          padding: 1rem 0.5rem;
+        }
+        .owned-notice-icon {
+          font-size: 2.5rem;
+          margin-bottom: 0.5rem;
+        }
+        .owned-notice h3 {
+          margin: 0 0 0.75rem 0;
+          color: #073C39;
+        }
+        .owned-notice p {
+          color: #5D8172;
+          font-size: 0.95rem;
+          line-height: 1.6;
+          margin: 0 0 0.5rem;
+        }
+        .owned-notice-sub {
+          color: #B18B36 !important;
+          font-weight: 600;
+        }
+
+        /* Post-purchase next-upgrade popup */
+        .next-upgrade-card {
+          width: 100%;
+          margin-top: 1.25rem;
+          padding: 1rem 1.1rem;
+          border-radius: 12px;
+          background: linear-gradient(135deg, #073C39 0%, #0B4541 100%);
+          color: white;
+          text-align: left;
+          box-shadow: 0 4px 20px rgba(7, 60, 57, 0.3);
+        }
+        .next-upgrade-card.top {
+          background: linear-gradient(135deg, #B18B36 0%, #996F19 100%);
+        }
+        .next-upgrade-head {
+          display: flex;
+          align-items: flex-start;
+          gap: 0.65rem;
+          margin-bottom: 0.65rem;
+        }
+        .next-upgrade-icon {
+          font-size: 1.5rem;
+          line-height: 1;
+        }
+        .next-upgrade-title {
+          display: block;
+          font-weight: 700;
+          font-size: 0.95rem;
+        }
+        .next-upgrade-sub {
+          display: block;
+          font-size: 0.78rem;
+          color: rgba(255, 255, 255, 0.75);
+          margin-top: 0.15rem;
+        }
+        .next-upgrade-bar {
+          height: 8px;
+          border-radius: 99px;
+          background: rgba(255, 255, 255, 0.2);
+          overflow: hidden;
+          margin-bottom: 0.65rem;
+        }
+        .next-upgrade-fill {
+          height: 100%;
+          border-radius: 99px;
+          background: #ECCA7B;
+          transition: width 0.4s ease;
+        }
+        .next-upgrade-note {
+          margin: 0;
+          font-size: 0.8rem;
+          color: rgba(255, 255, 255, 0.85);
+          line-height: 1.5;
+        }
+        .next-upgrade-btn {
+          margin-top: 1.25rem;
+          min-width: 140px;
         }
 
         .failed-state h3 {
@@ -591,6 +1175,54 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
         }
       `}</style>
     </div>
+
+    {lightboxOpen && previewImage && (
+      <div className="design-lightbox-overlay" onClick={() => setLightboxOpen(false)}>
+        <button className="design-lightbox-close" onClick={() => setLightboxOpen(false)}>&times;</button>
+        <img
+          className="design-lightbox-image"
+          src={resolveImageUrl(previewImage)}
+          alt={`${selectedDesign ? selectedDesign.name : product.name} - full view`}
+          onClick={(e) => e.stopPropagation()}
+        />
+        {designImages.length > 1 && (
+          <>
+            <button
+              className="design-lightbox-nav design-lightbox-prev"
+              onClick={(e) => { e.stopPropagation(); setDesignImageIdx((designImageIdx - 1 + designImages.length) % designImages.length); }}
+            >
+              &#8249;
+            </button>
+            <button
+              className="design-lightbox-nav design-lightbox-next"
+              onClick={(e) => { e.stopPropagation(); setDesignImageIdx((designImageIdx + 1) % designImages.length); }}
+            >
+              &#8250;
+            </button>
+            <div className="design-lightbox-caption">
+              {selectedDesign ? `${selectedDesign.name} · ${designImageIdx + 1} / ${designImages.length}` : ''}
+            </div>
+          </>
+        )}
+      </div>
+    )}
+    {designVideoOpen && selectedDesign && getYouTubeId(selectedDesign.video_link) && (
+      <div className="design-video-overlay" onClick={() => setDesignVideoOpen(false)}>
+        <div className="design-video-box" onClick={(e) => e.stopPropagation()}>
+          <button className="design-video-close" onClick={() => setDesignVideoOpen(false)}>&times;</button>
+          <div className="design-video-frame">
+            <iframe
+              src={`https://www.youtube.com/embed/${getYouTubeId(selectedDesign.video_link)}?autoplay=1&rel=0`}
+              title={`${selectedDesign.name} Video`}
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            ></iframe>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 

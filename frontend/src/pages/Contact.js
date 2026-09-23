@@ -314,7 +314,7 @@ const Contact = () => {
                   <path d="M6 9l6 6 6-6"/>
                 </svg>
               </div>
-              <p className="faq-answer">When you purchase a product, you become eligible for our referral program. For every friend you refer who makes a purchase, you earn a monthly incentive for a fixed duration.</p>
+              <p className="faq-answer">When you purchase a product, you become eligible for our referral program. For every friend you refer who makes a purchase, you earn Level Income across 8 levels per rank (Star, Silver, Gold, Platinum) when your team buys — and again when their Repurchase Wallet auto-buys their next rank.</p>
             </div>
             <div className="faq-item">
               <div className="faq-question">
@@ -381,7 +381,7 @@ const Contact = () => {
         .glow-1 {
           width: 400px;
           height: 400px;
-          background: rgba(37, 99, 235, 0.08);
+          background: rgba(7, 60, 57, 0.08);
           top: -50px;
           right: -50px;
         }
@@ -413,18 +413,18 @@ const Contact = () => {
           align-items: center;
           gap: 0.5rem;
           padding: 0.5rem 1rem;
-          background: rgba(37, 99, 235, 0.08);
+          background: rgba(7, 60, 57, 0.08);
           border-radius: 100px;
           margin-bottom: 1.5rem;
           font-size: 0.8125rem;
           font-weight: 500;
-          color: #2563eb;
+          color: #073C39;
         }
 
         .eyebrow-dot {
           width: 6px;
           height: 6px;
-          background: #2563eb;
+          background: #073C39;
           border-radius: 50%;
           animation: pulse 2s infinite;
         }
@@ -451,7 +451,7 @@ const Contact = () => {
           display: block;
           font-size: clamp(2.5rem, 5vw, 3.5rem);
           font-weight: 500;
-          background: linear-gradient(135deg, #2563eb, #059669);
+          background: linear-gradient(135deg, #073C39, #5D8172);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
@@ -516,9 +516,9 @@ const Contact = () => {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, #dbeafe, #eff6ff);
+          background: linear-gradient(135deg, #E3EDE4, #F1F5F1);
           border-radius: 12px;
-          color: #2563eb;
+          color: #073C39;
           flex-shrink: 0;
         }
 
@@ -565,7 +565,7 @@ const Contact = () => {
         }
 
         .social-link:hover {
-          background: #2563eb;
+          background: #073C39;
           color: #fff;
           transform: translateY(-2px);
         }
@@ -590,8 +590,8 @@ const Contact = () => {
           align-items: center;
           gap: 0.75rem;
           padding: 1rem;
-          background: #d1fae5;
-          color: #059669;
+          background: #E3EDE4;
+          color: #5D8172;
           border-radius: 12px;
           margin-bottom: 1.5rem;
           animation: slideIn 0.3s ease;
@@ -644,9 +644,9 @@ const Contact = () => {
         .form-group select:focus,
         .form-group textarea:focus {
           outline: none;
-          border-color: #2563eb;
+          border-color: #073C39;
           background: #fff;
-          box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+          box-shadow: 0 0 0 3px rgba(7, 60, 57, 0.1);
         }
 
         .form-group textarea {
@@ -702,7 +702,7 @@ const Contact = () => {
           justify-content: center;
           background: #fff;
           border-radius: 50%;
-          color: #2563eb;
+          color: #073C39;
           margin: 0 auto 1.5rem;
           box-shadow: 0 10px 30px rgba(0,0,0,0.1);
         }
@@ -752,8 +752,8 @@ const Contact = () => {
         .section-label {
           display: inline-block;
           padding: 0.5rem 1rem;
-          background: linear-gradient(135deg, #dbeafe, #eff6ff);
-          color: #2563eb;
+          background: linear-gradient(135deg, #E3EDE4, #F1F5F1);
+          color: #073C39;
           font-size: 0.75rem;
           font-weight: 600;
           letter-spacing: 0.05em;

@@ -309,7 +309,7 @@ const Products = () => {
           <div className="cta-content">
             <div className="cta-badge">Partner Program</div>
             <h2>Earn While You Sleep</h2>
-            <p>Join our referral program and earn daily incentive for every friend you refer. Start building your passive income today.</p>
+            <p>Join our referral program and earn Team Income for every friend you refer. Start building your passive income today.</p>
             <div className="cta-buttons">
               <Link to="/register" className="btn btn-white">
                 <span>Join Now</span>
@@ -366,7 +366,7 @@ const Products = () => {
         .glow-1 {
           width: 400px;
           height: 400px;
-          background: rgba(37, 99, 235, 0.08);
+          background: rgba(7, 60, 57, 0.08);
           top: -50px;
           right: -50px;
         }
@@ -398,18 +398,18 @@ const Products = () => {
           align-items: center;
           gap: 0.5rem;
           padding: 0.5rem 1rem;
-          background: rgba(37, 99, 235, 0.08);
+          background: rgba(7, 60, 57, 0.08);
           border-radius: 100px;
           margin-bottom: 1.5rem;
           font-size: 0.8125rem;
           font-weight: 500;
-          color: #2563eb;
+          color: #073C39;
         }
 
         .eyebrow-dot {
           width: 6px;
           height: 6px;
-          background: #2563eb;
+          background: #073C39;
           border-radius: 50%;
           animation: pulse 2s infinite;
         }
@@ -436,7 +436,7 @@ const Products = () => {
           display: block;
           font-size: clamp(2.5rem, 5vw, 3.5rem);
           font-weight: 500;
-          background: linear-gradient(135deg, #2563eb, #059669);
+          background: linear-gradient(135deg, #073C39, #5D8172);
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
           background-clip: text;
@@ -529,7 +529,7 @@ const Products = () => {
           inset: 0;
           border-radius: inherit;
           padding: 2px;
-          background: linear-gradient(135deg, #2563eb, #059669);
+          background: linear-gradient(135deg, #073C39, #5D8172);
           -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           -webkit-mask-composite: xor;
                   mask-composite: exclude;
@@ -540,7 +540,7 @@ const Products = () => {
 
         .product-card:hover {
           transform: translateY(-10px);
-          box-shadow: 0 24px 48px rgba(37, 99, 235, 0.14), 0 8px 20px rgba(0, 0, 0, 0.08);
+          box-shadow: 0 24px 48px rgba(7, 60, 57, 0.14), 0 8px 20px rgba(0, 0, 0, 0.08);
         }
 
         .product-card:hover::before {
@@ -587,7 +587,7 @@ const Products = () => {
           align-items: center;
           justify-content: center;
           font-size: 4rem;
-          color: #2563eb;
+          color: #073C39;
           background: linear-gradient(135deg, #f5f5f5, #e5e5e5);
         }
 
@@ -641,18 +641,18 @@ const Products = () => {
         }
 
         .badge.bestseller {
-          background: linear-gradient(135deg, #2563eb, #1d4ed8);
+          background: linear-gradient(135deg, #073C39, #0B4541);
           color: #fff;
         }
 
         .badge.new {
-          background: linear-gradient(135deg, #059669, #047857);
+          background: linear-gradient(135deg, #5D8172, #40584E);
           color: #fff;
         }
 
         .badge.instock {
-          background: #d1fae5;
-          color: #059669;
+          background: #E3EDE4;
+          color: #5D8172;
         }
 
         .wishlist-btn {
@@ -688,7 +688,7 @@ const Products = () => {
         .product-category {
           font-size: 0.6875rem;
           font-weight: 700;
-          color: #2563eb;
+          color: #073C39;
           text-transform: uppercase;
           letter-spacing: 0.08em;
           margin-bottom: 0.4rem;
@@ -704,7 +704,7 @@ const Products = () => {
         }
 
         .product-card:hover .product-name {
-          color: #2563eb;
+          color: #073C39;
         }
 
         .product-desc {
@@ -730,8 +730,8 @@ const Products = () => {
           align-items: center;
           font-size: 0.6875rem;
           font-weight: 600;
-          color: #059669;
-          background: #d1fae5;
+          color: #5D8172;
+          background: #E3EDE4;
           padding: 0.3rem 0.7rem;
           border-radius: 100px;
           border: 1px solid rgba(5, 150, 105, 0.18);
@@ -763,7 +763,7 @@ const Products = () => {
           gap: 0.5rem;
           width: 100%;
           padding: 0.85rem 1.5rem;
-          background: linear-gradient(135deg, #2563eb, #059669);
+          background: linear-gradient(135deg, #073C39, #5D8172);
           color: #fff;
           font-size: 0.875rem;
           font-weight: 600;
@@ -772,13 +772,13 @@ const Products = () => {
           border: none;
           border-radius: 12px;
           cursor: pointer;
-          box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+          box-shadow: 0 4px 14px rgba(7, 60, 57, 0.28);
           transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
         }
 
         .btn-add-to-cart:hover {
           transform: translateY(-2px);
-          box-shadow: 0 10px 24px rgba(37, 99, 235, 0.38);
+          box-shadow: 0 10px 24px rgba(7, 60, 57, 0.38);
           filter: brightness(1.05);
         }
 
@@ -838,13 +838,13 @@ const Products = () => {
 
         .no-products-icon {
           font-size: 4rem;
-          color: #2563eb;
+          color: #073C39;
           display: flex;
           align-items: center;
           justify-content: center;
           width: 80px;
           height: 80px;
-          background: #dbeafe;
+          background: #E3EDE4;
           border-radius: 50%;
           margin: 0 auto 1.5rem;
         }
@@ -906,9 +906,9 @@ const Products = () => {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, #dbeafe, #eff6ff);
+          background: linear-gradient(135deg, #E3EDE4, #F1F5F1);
           border-radius: 16px;
-          color: #2563eb;
+          color: #073C39;
           margin: 0 auto 1rem;
         }
 

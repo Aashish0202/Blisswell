@@ -2,75 +2,69 @@ const pool = require('../config/db');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const Order = require('../models/Order');
-const SalaryCycle = require('../models/SalaryCycle');
-const SalaryPayout = require('../models/SalaryPayout');
-const IncentiveCredit = require('../models/IncentiveCredit');
+const Product = require('../models/Product');
 const Settings = require('../models/Settings');
 const KYC = require('../models/KYC');
+const TeamIncomeEvent = require('../models/TeamIncomeEvent');
+const WithdrawalRequest = require('../models/WithdrawalRequest');
+const WalletTransaction = require('../models/WalletTransaction');
+const teamIncomeService = require('../services/teamIncomeService');
 const fs = require('fs');
 const path = require('path');
 
-// Get user dashboard data
+// Upgrade progress for the logged-in user: the next higher-priced active
+// product above their current one, and how much is still needed.
+async function getUpgradeInfo(userId) {
+  const user = await User.findById(userId);
+  if (!user || !user.has_active_package || !user.current_product_id) return null;
+  const next = await Product.getNextHigherProduct(user.current_product_id);
+  if (!next) return { at_top_rank: true };
+  const repurchaseBalance = parseFloat((await Wallet.getByUserId(userId))?.repurchase_balance) || 0;
+  const nextPrice = parseFloat(next.price);
+  return {
+    next_product_id: next.id,
+    next_rank_name: next.rank_name,
+    next_price: nextPrice,
+    repurchase_balance: repurchaseBalance,
+    shortfall: parseFloat(Math.max(0, nextPrice - repurchaseBalance).toFixed(2)),
+    progress: Math.min(100, parseFloat(((repurchaseBalance / nextPrice) * 100).toFixed(1)))
+  };
+}
+// Exposed so the purchase endpoints can attach next-upgrade info to the
+// purchase-success response (drives the post-purchase popup).
+exports.getUpgradeInfo = getUpgradeInfo;
+
+// Get user dashboard data (§30 earnings + selfCashback + teamIncome blocks)
 exports.getDashboard = async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('[DASHBOARD] Request received - User ID from token:', userId);
-    console.log('[DASHBOARD] Request headers authorization:', req.headers.authorization?.substring(0, 50) + '...');
 
-    // Get user info
     const user = await User.findById(userId);
-    console.log('[DASHBOARD] Fetched user from DB:', user?.id, '-', user?.name, '-', user?.referral_code);
-
     if (!user) {
-      console.log('[DASHBOARD] User not found for ID:', userId);
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Get wallet balance
-    let wallet = { balance: 0 };
-    try {
-      wallet = await Wallet.getByUserId(userId) || { balance: 0 };
-    } catch (e) {
-      console.error('Wallet fetch error:', e);
-    }
+    const wallet = await Wallet.getByUserId(userId) || { balance: 0, earnings_balance: 0 };
 
-    // Get referral count
-    let totalReferrals = 0;
-    let activeReferrals = 0;
-    try {
-      totalReferrals = (await User.getReferrals(userId)).length;
-      activeReferrals = await User.countActiveReferrals(userId);
-    } catch (e) {
-      console.error('Referrals fetch error:', e);
-    }
+    // Income total (level income — manual purchases + auto-repurchase upgrades)
+    const teamIncomeTotal = await TeamIncomeEvent.sumByUpline(userId);
 
-    // Get salary cycles
-    let cycles = [];
-    try {
-      cycles = await SalaryCycle.getBySponsorId(userId, 1, 100);
-    } catch (e) {
-      console.error('Cycles fetch error:', e);
-    }
+    const [wdRows] = await pool.execute(
+      `SELECT
+         COALESCE(SUM(CASE WHEN status='processed' THEN amount ELSE 0 END),0) as withdrawn,
+         COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0) as pending
+       FROM withdrawal_requests WHERE user_id = ?`,
+      [userId]
+    );
+    const totalWithdrawn = parseFloat(wdRows[0].withdrawn) || 0;
+    const pendingWithdrawal = parseFloat(wdRows[0].pending) || 0;
 
-    // Get pending salary
-    let pendingAmount = 0;
-    let totalEarned = 0;
-    try {
-      const pendingPayouts = await SalaryPayout.getAll(1, 100, { user_id: userId, status: 'pending' });
-      pendingAmount = pendingPayouts.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-    } catch (e) {
-      console.error('Pending payouts fetch error:', e);
-    }
+    const totalEarnings = parseFloat(teamIncomeTotal.toFixed(2));
+    const availableForWithdrawal = parseFloat(wallet.earnings_balance) || 0;
 
-    // Get total earned (lifetime incentive credited to the earning wallet —
-    // matches the Earning Wallet shown on the Salary page, NOT paid-out amount)
-    try {
-      totalEarned = parseFloat(await IncentiveCredit.getTotalByUserId(userId)) || 0;
-    } catch (e) {
-      console.error('Total earned fetch error:', e);
-    }
+    const totalReferrals = await User.countReferrals(userId);
+    const activeReferrals = await User.countActiveReferrals(userId);
 
-    // Get recent orders
     let recentOrders = [];
     try {
       recentOrders = await Order.getByUserId(userId, 1, 5);
@@ -78,7 +72,11 @@ exports.getDashboard = async (req, res) => {
       console.error('Orders fetch error:', e);
     }
 
-    const response = {
+    // New income blocks
+    const teamIncome = await teamIncomeService.getUplineEarningsSummary(userId);
+    const upgrade = await getUpgradeInfo(userId);
+
+    res.json({
       user: {
         name: user.name,
         email: user.email,
@@ -87,23 +85,29 @@ exports.getDashboard = async (req, res) => {
         pan_status: user.pan_status,
         referral_code: user.referral_code,
         has_active_package: user.has_active_package,
+        rank_name: user.rank_name || null,
+        current_product_id: user.current_product_id || null,
         created_at: user.created_at
       },
       wallet: {
         balance: wallet?.balance || 0,
-        earnings_balance: wallet?.earnings_balance || 0
+        earnings_balance: availableForWithdrawal,
+        repurchase_balance: parseFloat(wallet?.repurchase_balance) || 0
       },
       referrals: {
         total: totalReferrals,
         active: activeReferrals
       },
-      salary: {
-        earnings_balance: wallet?.earnings_balance || 0,
-        pending_amount: pendingAmount,
-        total_earned: totalEarned,
-        active_cycles: cycles.filter(c => c.status === 'active').length,
-        completed_cycles: cycles.filter(c => c.status === 'completed').length
+      earnings: {
+        totalEarnings,
+        teamIncomeTotal: parseFloat(teamIncomeTotal.toFixed(2)),
+        availableForWithdrawal,
+        totalWithdrawn,
+        pendingWithdrawal,
+        repurchaseBalance: parseFloat(wallet?.repurchase_balance) || 0
       },
+      teamIncome,
+      upgrade,
       recentOrders: (recentOrders || []).map(o => ({
         id: o.id,
         product_name: o.product_name,
@@ -111,10 +115,7 @@ exports.getDashboard = async (req, res) => {
         status: o.status,
         created_at: o.created_at
       }))
-    };
-
-    console.log('Dashboard response:', JSON.stringify(response, null, 2));
-    res.json(response);
+    });
   } catch (error) {
     console.error('Dashboard error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -140,6 +141,7 @@ exports.getProfile = async (req, res) => {
         mobile: user.mobile,
         state: user.state || '',
         address: user.address || '',
+        pincode: user.pincode || '',
         pan_number: user.pan_number,
         pan_status: user.pan_status,
         gst_number: user.gst_number || '',
@@ -172,7 +174,7 @@ exports.getProfile = async (req, res) => {
 // Update user profile
 exports.updateProfile = async (req, res) => {
   try {
-    const { name, mobile, pan_number, state, address, gst_number } = req.body;
+    const { name, mobile, pan_number, state, address, pincode, gst_number } = req.body;
 
     // Get current user to check existing PAN
     const currentUser = await User.findById(req.user.id);
@@ -196,6 +198,13 @@ exports.updateProfile = async (req, res) => {
     }
     if (address !== undefined) {
       updateData.address = address;
+    }
+    if (pincode !== undefined) {
+      // Validate format when a non-empty pincode is given (Indian 6-digit)
+      if (pincode && pincode.trim() !== '' && !/^[1-9]\d{5}$/.test(pincode.trim())) {
+        return res.status(400).json({ message: 'Invalid pincode. Enter a valid 6-digit pincode.' });
+      }
+      updateData.pincode = pincode && pincode.trim() !== '' ? pincode.trim() : null;
     }
 
     // Update GST number if provided
@@ -352,6 +361,45 @@ exports.getReferrals = async (req, res) => {
   }
 };
 
+// Full 8-level downline tree, with level filter + search across
+// name/email/mobile/referral_code. Used by the Team page's "My Network" view.
+exports.getDownlineTeam = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const level = req.query.level ? parseInt(req.query.level, 10) : null;
+    const search = (req.query.search || '').trim();
+
+    const { rows, total, levelCounts } = await User.getDownline(req.user.id, { page, limit, level, search });
+
+    res.json({
+      members: rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        mobile: r.mobile,
+        referral_code: r.referral_code,
+        has_active_package: r.has_active_package,
+        rank_name: r.rank_name,
+        level: r.level,
+        created_at: r.created_at
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      levelCounts: levelCounts.map(l => ({
+        level: l.level,
+        count: parseInt(l.count, 10) || 0,
+        active_count: parseInt(l.active_count, 10) || 0
+      }))
+    });
+  } catch (error) {
+    console.error('Get downline team error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // Aggregated referral stats (correct across ALL referrals, not just current page)
 exports.getReferralSummary = async (req, res) => {
   try {
@@ -399,132 +447,105 @@ exports.getReferralPurchases = async (req, res) => {
   }
 };
 
-// Aggregated salary stats across ALL cycles/payouts (for the Salary page stat cards)
-exports.getSalarySummary = async (req, res) => {
+// Earnings summary — Total Earnings (level income), available for withdrawal,
+// total withdrawn, pending withdrawal.
+exports.getEarningsSummary = async (req, res) => {
   try {
     const userId = req.user.id;
+    const wallet = await Wallet.getByUserId(userId) || { earnings_balance: 0 };
 
-    const [cycleStats] = await pool.execute(
+    const teamIncomeTotal = await TeamIncomeEvent.sumByUpline(userId);
+
+    const [wdRows] = await pool.execute(
       `SELECT
-        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_cycles,
-        COALESCE(SUM(CASE WHEN status = 'active'
-          THEN (days - days_paid) * daily_amount ELSE 0 END), 0) as remaining_incentive
-       FROM salary_cycles WHERE sponsor_id = ?`,
+         COALESCE(SUM(CASE WHEN status='processed' THEN amount ELSE 0 END),0) as withdrawn,
+         COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0) as pending
+       FROM withdrawal_requests WHERE user_id = ?`,
       [userId]
     );
-
-    const [payoutStats] = await pool.execute(
-      `SELECT
-        COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) as total_earned,
-        COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as pending_amount
-       FROM salary_payouts WHERE user_id = ?`,
-      [userId]
-    );
+    const totalWithdrawn = parseFloat(wdRows[0].withdrawn) || 0;
+    const pendingWithdrawal = parseFloat(wdRows[0].pending) || 0;
+    const availableForWithdrawal = parseFloat(wallet.earnings_balance) || 0;
 
     res.json({
-      summary: {
-        totalActive: parseInt(cycleStats[0].active_cycles) || 0,
-        totalEarned: parseFloat(payoutStats[0].total_earned) || 0,
-        pendingAmount: parseFloat(payoutStats[0].pending_amount) || 0,
-        remainingIncentive: parseFloat(cycleStats[0].remaining_incentive) || 0
+      earnings: {
+        totalEarnings: parseFloat(teamIncomeTotal.toFixed(2)),
+        teamIncomeTotal: parseFloat(teamIncomeTotal.toFixed(2)),
+        availableForWithdrawal,
+        totalWithdrawn,
+        pendingWithdrawal,
+        repurchaseBalance: parseFloat(wallet.repurchase_balance) || 0
       }
     });
   } catch (error) {
-    console.error('Get salary summary error:', error);
+    console.error('Get earnings summary error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-// Get salary cycles
-exports.getSalaryCycles = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-
-    const total = await SalaryCycle.countBySponsor(req.user.id);
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-
-    const cycles = await SalaryCycle.getBySponsorId(req.user.id, page, limit);
-
-    res.json({
-      cycles: cycles.map(c => ({
-        id: c.id,
-        referral_name: c.referral_name,
-        referral_email: c.referral_email,
-        start_date: c.start_date || c.start_month,
-        daily_amount: c.daily_amount,
-        days: c.days,
-        days_paid: c.days_paid,
-        // legacy fields kept for backward compatibility
-        start_month: c.start_month,
-        monthly_amount: c.monthly_amount,
-        months_paid: c.months_paid,
-        duration: c.duration,
-        status: c.status,
-        created_at: c.created_at
-      })),
-      total,
-      page,
-      limit,
-      totalPages
-    });
-  } catch (error) {
-    console.error('Get salary cycles error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// Get payout history
-exports.getPayouts = async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-
-    const total = await SalaryPayout.countByUserId(req.user.id);
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-
-    const payouts = await SalaryPayout.getByUserId(req.user.id, page, limit);
-
-    res.json({
-      payouts: payouts.map(p => ({
-        id: p.id,
-        referral_name: p.referral_name,
-        month: p.month,
-        year: p.year,
-        payout_date: p.payout_date,
-        is_withdrawal: p.cycle_id === null,
-        amount: p.amount,
-        status: p.status,
-        paid_at: p.paid_at,
-        created_at: p.created_at
-      })),
-      total,
-      page,
-      limit,
-      totalPages
-    });
-  } catch (error) {
-    console.error('Get payouts error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-// Get earning wallet (incentive earnings balance + min payout threshold)
-exports.getEarnings = async (req, res) => {
+// Full earnings breakdown — earnings summary + team income summary.
+exports.getEarningsBreakdown = async (req, res) => {
   try {
     const userId = req.user.id;
-    const earningsBalance = await Wallet.getEarnings(userId);
-    const settings = await Settings.getPackageSettings();
-    const totalEarned = await IncentiveCredit.getTotalByUserId(userId);
+    const wallet = await Wallet.getByUserId(userId) || { earnings_balance: 0 };
+
+    const teamIncomeTotal = await TeamIncomeEvent.sumByUpline(userId);
+
+    const [wdRows] = await pool.execute(
+      `SELECT
+         COALESCE(SUM(CASE WHEN status='processed' THEN amount ELSE 0 END),0) as withdrawn,
+         COALESCE(SUM(CASE WHEN status='pending' THEN amount ELSE 0 END),0) as pending
+       FROM withdrawal_requests WHERE user_id = ?`,
+      [userId]
+    );
+    const totalWithdrawn = parseFloat(wdRows[0].withdrawn) || 0;
+    const pendingWithdrawal = parseFloat(wdRows[0].pending) || 0;
+    const availableForWithdrawal = parseFloat(wallet.earnings_balance) || 0;
+
+    const teamIncome = await teamIncomeService.getUplineEarningsSummary(userId);
+    const upgrade = await getUpgradeInfo(userId);
 
     res.json({
-      earnings_balance: parseFloat(earningsBalance) || 0,
-      total_earned: parseFloat(totalEarned) || 0,
-      min_payout_amount: settings.min_payout_amount,
-      payout_day: settings.payout_day
+      earnings: {
+        totalEarnings: parseFloat(teamIncomeTotal.toFixed(2)),
+        teamIncomeTotal: parseFloat(teamIncomeTotal.toFixed(2)),
+        availableForWithdrawal,
+        totalWithdrawn,
+        pendingWithdrawal,
+        repurchaseBalance: parseFloat(wallet.repurchase_balance) || 0
+      },
+      teamIncome,
+      upgrade
     });
   } catch (error) {
-    console.error('Get earnings error:', error);
+    console.error('Get earnings breakdown error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Team Income summary for the logged-in user (per-rank, per-level earned).
+exports.getTeamIncome = async (req, res) => {
+  try {
+    const teamIncome = await teamIncomeService.getUplineEarningsSummary(req.user.id);
+    res.json({ teamIncome });
+  } catch (error) {
+    console.error('Get team income error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Team Income event history (paginated) for the logged-in user.
+// Optional ?source=purchase|repurchase filter.
+exports.getTeamIncomeHistory = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const source = req.query.source === 'purchase' || req.query.source === 'repurchase'
+      ? req.query.source : '';
+    const result = await teamIncomeService.getUplineEvents(req.user.id, page, limit, pool, source);
+    res.json(result);
+  } catch (error) {
+    console.error('Get team income history error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -535,7 +556,6 @@ exports.getWalletTransactions = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
 
-    const WalletTransaction = require('../models/WalletTransaction');
     const total = await WalletTransaction.countByUserId(req.user.id);
     const totalPages = Math.max(1, Math.ceil(total / limit));
 

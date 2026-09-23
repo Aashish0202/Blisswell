@@ -67,7 +67,7 @@ const AdminOrders = () => {
     {
       key: 'order_number',
       label: 'Order ID',
-      render: (value) => <span className="order-number">#{value}</span>
+      render: (value) => <span className="order-number">{value ? `#${value}` : '—'}</span>
     },
     {
       key: 'product_image',
@@ -86,6 +86,15 @@ const AdminOrders = () => {
             <span className="product-amount">₹{row.amount?.toLocaleString()}</span>
           </div>
         </div>
+      )
+    },
+    {
+      key: 'design_name',
+      label: 'Design',
+      render: (value) => value ? (
+        <span className="design-cell">{value}</span>
+      ) : (
+        <span className="no-design">—</span>
       )
     },
     {
@@ -146,6 +155,7 @@ const AdminOrders = () => {
     { key: 'user_name', label: 'Customer Name' },
     { key: 'user_email', label: 'Customer Email' },
     { key: 'product_name', label: 'Product' },
+    { key: 'design_name', label: 'Design' },
     { key: 'amount', label: 'Amount' },
     { key: 'payment_type', label: 'Payment Type' },
     { key: 'status', label: 'Status' },
@@ -295,6 +305,21 @@ const AdminOrders = () => {
           display: flex;
           align-items: center;
           gap: 0.75rem;
+        }
+
+        .design-cell {
+          display: inline-block;
+          padding: 0.2rem 0.6rem;
+          background: var(--primary-50, #eff6ff);
+          color: var(--primary-700, #1d4ed8);
+          border-radius: var(--radius-full, 999px);
+          font-size: 0.75rem;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+
+        .no-design {
+          color: var(--gray-300, #d1d5db);
         }
 
         .product-thumb {

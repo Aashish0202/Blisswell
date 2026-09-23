@@ -8,7 +8,10 @@ const pool = mysql.createPool({
   database: process.env.DB_NAME || 'blisswell',
   port: process.env.DB_PORT || 3306,
   waitForConnections: true,
-  connectionLimit: 10,
+  // Tunable for production: each connection serves one concurrent DB op, so
+  // size roughly to expected concurrent requests (set DB_CONNECTION_LIMIT in
+  // the production .env; default keeps local dev light).
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT, 10) || 10,
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,

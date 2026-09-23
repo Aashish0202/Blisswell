@@ -1,17 +1,39 @@
 const pool = require('../config/db');
 
 const WalletTransaction = {
-  // Create transaction
+  // Create transaction. Supports the new income columns:
+  //   level, source_user_id, reference_key (UNIQUE → idempotent).
   async create(data, connection = pool) {
-    const { user_id, type, amount, payment_id, order_id, status, description } = data;
+    const { user_id, type, amount, payment_id, order_id, status, description, level, source_user_id, reference_key } = data;
     const conn = connection;
     const [result] = await conn.execute(
       `INSERT INTO wallet_transactions
-       (user_id, type, amount, payment_id, order_id, status, description)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [user_id, type, amount, payment_id || null, order_id || null, status || 'completed', description || null]
+       (user_id, type, amount, level, source_user_id, payment_id, order_id, status, reference_key, description)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        user_id,
+        type,
+        amount,
+        level != null ? level : null,
+        source_user_id != null ? source_user_id : null,
+        payment_id || null,
+        order_id || null,
+        status || 'completed',
+        reference_key || null,
+        description || null
+      ]
     );
     return result.insertId;
+  },
+
+  // Look up a transaction by its idempotency reference key.
+  async getByReferenceKey(referenceKey, connection = pool) {
+    const conn = connection;
+    const [rows] = await conn.execute(
+      'SELECT * FROM wallet_transactions WHERE reference_key = ?',
+      [referenceKey]
+    );
+    return rows[0];
   },
 
   // Get transactions by user ID
@@ -34,6 +56,27 @@ const WalletTransaction = {
       [userId]
     );
     return rows[0].count;
+  },
+
+  // Lifetime totals for the wallet page stat cards, computed across ALL
+  // history (not just the current page) and from completed transactions
+  // only — failed payment attempts never inflate the numbers.
+  async getLifetimeStats(userId) {
+    const [rows] = await pool.execute(
+      `SELECT
+        COALESCE(SUM(CASE WHEN amount > 0 AND status = 'completed' THEN amount ELSE 0 END), 0) AS total_earned,
+        COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status = 'completed' THEN ABS(amount) ELSE 0 END), 0) AS total_withdrawn,
+        COALESCE(SUM(CASE WHEN type IN ('purchase', 'repurchase') AND status = 'completed' THEN ABS(amount) ELSE 0 END), 0) AS total_spent
+       FROM wallet_transactions
+       WHERE user_id = ?`,
+      [userId]
+    );
+    const r = rows[0] || {};
+    return {
+      total_earned: parseFloat(r.total_earned) || 0,
+      total_withdrawn: parseFloat(r.total_withdrawn) || 0,
+      total_spent: parseFloat(r.total_spent) || 0
+    };
   },
 
   // Get transaction by ID

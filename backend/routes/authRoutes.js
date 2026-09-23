@@ -9,6 +9,7 @@ const registerValidation = [
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('email').isEmail().withMessage('Valid email is required'),
   body('mobile').matches(/^[6-9]\d{9}$/).withMessage('Valid mobile number is required'),
+  body('pincode').matches(/^[1-9]\d{5}$/).withMessage('Valid 6-digit pincode is required'),
   body('pan_number').matches(/^[A-Z]{5}[0-9]{4}[A-Z]$/).withMessage('Valid PAN number is required (format: ABCDE1234F)'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('terms_accepted').equals('true').withMessage('You must accept the terms and conditions')

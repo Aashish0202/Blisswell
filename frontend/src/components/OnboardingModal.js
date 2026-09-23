@@ -29,7 +29,7 @@ const OnboardingModal = () => {
       title: 'Welcome to Blisswell!',
       description: 'Let us help you get started. This quick tour will show you how to start earning.',
       features: [
-        { icon: '💰', title: 'Earn Incentive', description: 'Get daily incentive per active referral' },
+        { icon: '📈', title: 'Level Income', description: 'Earn from your team’s purchases across 10 levels per rank' },
         { icon: '👥', title: 'Build Your Team', description: 'Invite friends and grow earnings' },
         { icon: '📦', title: 'Quality Products', description: 'Premium bedsheets at great prices' }
       ]
@@ -37,7 +37,7 @@ const OnboardingModal = () => {
     profile: {
       icon: '👤',
       title: 'Complete Your Profile',
-      description: 'Add your PAN number for verification. This is required to purchase packages and start earning.',
+      description: 'Add your PAN number for verification. This is required to purchase products and start earning.',
       action: {
         label: 'Go to Profile',
         href: '/profile'
@@ -54,8 +54,8 @@ const OnboardingModal = () => {
     },
     package: {
       icon: '📦',
-      title: 'Purchase a Package',
-      description: 'Buy a package to activate your account and start earning referral incentive.',
+      title: 'Purchase a Product',
+      description: 'Buy a rank package to activate your account and start earning level income.',
       action: {
         label: 'View Products',
         href: '/orders'
@@ -64,11 +64,11 @@ const OnboardingModal = () => {
     referral: {
       icon: '👥',
       title: 'Share & Earn',
-      description: 'Invite friends using your referral link. Earn daily incentive for each active referral for the product duration!',
+      description: 'Invite friends using your referral link. Earn Team Income for each active referral who purchases — 10 levels per rank!',
       features: [
         { icon: '🔗', title: 'Unique Link', description: 'Share your personal referral link' },
-        { icon: '💸', title: 'Daily Earnings', description: 'Credited daily to your earning wallet' },
-        { icon: '📅', title: 'Auto Withdrawal', description: 'Withdrawal generated at minimum payout' }
+        { icon: '🔄', title: 'Auto Repurchase', description: '20% of withdrawals auto-upgrades your rank' },
+        { icon: '📅', title: 'Withdrawals', description: 'Request a withdrawal (min ₹200) between 7–10 AM IST' }
       ]
     },
     tour: {
@@ -79,7 +79,7 @@ const OnboardingModal = () => {
         { icon: '📊', title: 'Dashboard', description: 'Overview of your activity' },
         { icon: '💰', title: 'Wallet', description: 'Manage your funds' },
         { icon: '📦', title: 'Orders', description: 'Track your purchases' },
-        { icon: '💸', title: 'Incentive', description: 'View your incentive earnings' }
+        { icon: '💸', title: 'Earnings', description: 'View your level income & withdrawals' }
       ]
     }
   };

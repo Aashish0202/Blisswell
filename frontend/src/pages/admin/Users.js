@@ -8,6 +8,7 @@ import ExportMenu from '../../components/ExportMenu';
 import ConfirmationDialog from '../../components/ConfirmationDialog';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
+import { rankBadgeClass } from '../../utils/rankTheme';
 
 const AdminUsers = () => {
   const [users, setUsers] = useState([]);
@@ -307,10 +308,26 @@ const AdminUsers = () => {
     },
     {
       key: 'has_active_package',
-      label: 'Package',
+      label: 'Active Product',
       render: (value) => (
         <span className={`badge badge-${value ? 'success' : 'warning'}`}>
           {value ? 'Active' : 'Inactive'}
+        </span>
+      )
+    },
+    {
+      key: 'rank_name',
+      label: 'Rank',
+      render: (value) => (
+        value ? <span className={rankBadgeClass(value)}>🏆 {value}</span> : <span className="text-muted">—</span>
+      )
+    },
+    {
+      key: 'repurchase_balance',
+      label: 'Repurchase Wallet',
+      render: (value) => (
+        <span className="text-warning font-semibold">
+          ₹{Number(value || 0).toLocaleString('en-IN')}
         </span>
       )
     },
@@ -380,7 +397,9 @@ const AdminUsers = () => {
     { key: 'referral_code', label: 'Referral Code' },
     { key: 'pan_number', label: 'PAN Number' },
     { key: 'pan_status', label: 'PAN Status' },
-    { key: 'has_active_package', label: 'Has Package' },
+    { key: 'has_active_package', label: 'Has Active Package' },
+    { key: 'rank_name', label: 'Rank' },
+    { key: 'repurchase_balance', label: 'Repurchase Wallet' },
     { key: 'is_active', label: 'Status' },
     { key: 'created_at', label: 'Joined' }
   ];
@@ -441,7 +460,7 @@ const AdminUsers = () => {
             <input
               type="text"
               className="form-input"
-              placeholder="Search by name, email, mobile..."
+              placeholder="Search by name, email, mobile, referral ID..."
               value={filters.search}
               onChange={(e) => setFilters({ ...filters, search: e.target.value })}
             />

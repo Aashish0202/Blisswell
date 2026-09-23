@@ -112,7 +112,7 @@ const ChangePassword = () => {
         </form>
 
         <p style={{ textAlign: 'center', marginTop: '1rem', color: '#6b7280' }}>
-          <Link to="/profile" style={{ color: '#6366f1' }}>
+          <Link to="/profile" style={{ color: '#CFAA57' }}>
             Back to Profile
           </Link>
         </p>

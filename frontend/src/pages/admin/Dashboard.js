@@ -35,11 +35,11 @@ const AdminDashboard = () => {
         variant: 'warning'
       });
     }
-    if (stats?.salary?.pending_payouts > 0) {
+    if (stats?.withdrawals?.pending_count > 0) {
       alerts.push({
-        label: 'Pending Payouts',
-        count: stats.salary.pending_payouts,
-        href: '/admin/salary?filter=pending',
+        label: 'Pending Withdrawals',
+        count: stats.withdrawals.pending_count,
+        href: '/admin/withdrawals?status=pending',
         variant: 'info'
       });
     }
@@ -107,37 +107,37 @@ const AdminDashboard = () => {
 
           <div className="stat-card warning">
             <div className="stat-icon">💸</div>
-            <div className="stat-label">Pending Payouts</div>
-            <div className="stat-value">₹{(stats?.salary?.pending_amount || 0).toLocaleString()}</div>
+            <div className="stat-label">Pending Withdrawals</div>
+            <div className="stat-value">₹{(stats?.withdrawals?.pending_amount || 0).toLocaleString()}</div>
             <div className="stat-subtext">
-              {stats?.salary?.pending_payouts || 0} withdrawals pending
+              {stats?.withdrawals?.pending_count || 0} withdrawals pending
             </div>
-            <Link to="/admin/salary" className="stat-link">Process Withdrawals →</Link>
+            <Link to="/admin/withdrawals" className="stat-link">Process Withdrawals →</Link>
           </div>
 
           <div className="stat-card info">
-            <div className="stat-icon">📊</div>
-            <div className="stat-label">Active Liability</div>
-            <div className="stat-value">₹{(stats?.salary?.active_liability || 0).toLocaleString()}</div>
+            <div className="stat-icon">🔄</div>
+            <div className="stat-label">Repurchase Credited</div>
+            <div className="stat-value">₹{(stats?.income?.repurchase_credited || 0).toLocaleString()}</div>
             <div className="stat-subtext">
-              Remaining incentive liability
+              20% of processed withdrawals → repurchase wallets
             </div>
           </div>
         </div>
 
-        {/* Cycle Stats */}
+        {/* Income Stats */}
         <div className="stats-row">
           <div className="mini-stat">
-            <span className="mini-stat-value text-success">{stats?.cycles?.active || 0}</span>
-            <span className="mini-stat-label">Active Cycles</span>
+            <span className="mini-stat-value text-primary">₹{(stats?.income?.team_income_paid || 0).toLocaleString()}</span>
+            <span className="mini-stat-label">Team Income Paid</span>
           </div>
           <div className="mini-stat">
-            <span className="mini-stat-value text-muted">{stats?.cycles?.completed || 0}</span>
-            <span className="mini-stat-label">Completed</span>
+            <span className="mini-stat-value text-success">₹{(stats?.withdrawals?.processed_amount || 0).toLocaleString()}</span>
+            <span className="mini-stat-label">Withdrawals Processed</span>
           </div>
           <div className="mini-stat">
-            <span className="mini-stat-value text-primary">₹{(stats?.salary?.paid_amount || 0).toLocaleString()}</span>
-            <span className="mini-stat-label">Total Paid</span>
+            <span className="mini-stat-value text-muted">₹{(stats?.orders?.total_sales || 0).toLocaleString()}</span>
+            <span className="mini-stat-label">Total Product Sales</span>
           </div>
         </div>
 
@@ -161,11 +161,11 @@ const AdminDashboard = () => {
                 <span className="quick-action-desc">View and manage orders</span>
               </div>
             </Link>
-            <Link to="/admin/salary" className="quick-action-card">
+            <Link to="/admin/withdrawals" className="quick-action-card">
               <span className="quick-action-icon">💰</span>
               <div className="quick-action-content">
                 <span className="quick-action-title">Withdrawals</span>
-                <span className="quick-action-desc">Process withdrawal payouts</span>
+                <span className="quick-action-desc">Process withdrawal requests</span>
               </div>
             </Link>
             <Link to="/admin/reports" className="quick-action-card">

@@ -15,7 +15,7 @@ export const OnboardingProvider = ({ children }) => {
       { id: 'welcome', title: 'Welcome', completed: false },
       { id: 'profile', title: 'Profile Setup', completed: false },
       { id: 'wallet', title: 'Wallet Funding', completed: false },
-      { id: 'package', title: 'Package Purchase', completed: false },
+      { id: 'package', title: 'Product Purchase', completed: false },
       { id: 'referral', title: 'Referral Program', completed: false },
       { id: 'tour', title: 'Dashboard Tour', completed: false }
     ]
@@ -111,7 +111,7 @@ export const OnboardingProvider = ({ children }) => {
         { id: 'welcome', title: 'Welcome', completed: false },
         { id: 'profile', title: 'Profile Setup', completed: false },
         { id: 'wallet', title: 'Wallet Funding', completed: false },
-        { id: 'package', title: 'Package Purchase', completed: false },
+        { id: 'package', title: 'Product Purchase', completed: false },
         { id: 'referral', title: 'Referral Program', completed: false },
         { id: 'tour', title: 'Dashboard Tour', completed: false }
       ]

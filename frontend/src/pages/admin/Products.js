@@ -142,17 +142,32 @@ const AdminProducts = () => {
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'table'
   const [lightbox, setLightbox] = useState({ isOpen: false, images: [], currentIndex: 0 });
   const [youtubeModal, setYoutubeModal] = useState({ isOpen: false, youtubeLink: '' });
-  const [formData, setFormData] = useState({
+  const emptyForm = () => ({
     name: '',
     description: '',
     price: '',
-    daily_amount: '50',
-    days: '15',
     image: '',
     images: [], // New field for multiple images
     youtube_link: '',
+    rank_name: '',
+    rank_order: 0,
+    level_income: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // L1..L10 team income per this rank
+    designs: [], // [{name, description, images: []}] — optional purchase variants
     is_active: true
   });
+
+  const parseLevelIncome = (li) => {
+    let arr = [];
+    if (Array.isArray(li)) arr = li;
+    else if (typeof li === 'string' && li) {
+      try { const parsed = JSON.parse(li); if (Array.isArray(parsed)) arr = parsed; } catch (e) { /* ignore */ }
+    }
+    const nums = arr.map(v => parseFloat(v) || 0);
+    while (nums.length < 10) nums.push(0);
+    return nums.slice(0, 10);
+  };
+
+  const [formData, setFormData] = useState(emptyForm());
 
   useEffect(() => {
     fetchProducts();
@@ -243,19 +258,113 @@ const AdminProducts = () => {
     });
   };
 
+  // ---- Designs (optional purchase variants) ----
+  const emptyDesign = () => ({ name: '', description: '', video_link: '', images: [] });
+
+  const addDesign = () => {
+    setFormData(prev => ({
+      ...prev,
+      designs: [...(prev.designs || []), emptyDesign()]
+    }));
+  };
+
+  const removeDesign = (designIdx) => {
+    setFormData(prev => ({
+      ...prev,
+      designs: prev.designs.filter((_, i) => i !== designIdx)
+    }));
+  };
+
+  const updateDesignField = (designIdx, field, value) => {
+    setFormData(prev => ({
+      ...prev,
+      designs: prev.designs.map((d, i) => i === designIdx ? { ...d, [field]: value } : d)
+    }));
+  };
+
+  // Upload/replace an image inside formData.designs[designIdx].images
+  const handleDesignImageUpload = async (e, designIdx, imgIndex = null) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Only image files are allowed (JPEG, PNG, GIF, WebP)');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size must be less than 5MB');
+      return;
+    }
+
+    const design = formData.designs[designIdx];
+    if (imgIndex === null && (design.images || []).length >= 5) {
+      toast.error('Maximum 5 images allowed per design');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const formDataUpload = new FormData();
+      formDataUpload.append('image', file);
+
+      const response = await adminAPI.uploadProductImage(formDataUpload);
+      const imageUrl = response.data.image_url;
+
+      setFormData(prev => ({
+        ...prev,
+        designs: prev.designs.map((d, i) => {
+          if (i !== designIdx) return d;
+          const images = imgIndex !== null
+            ? d.images.map((img, j) => j === imgIndex ? imageUrl : img)
+            : [...(d.images || []), imageUrl];
+          return { ...d, images };
+        })
+      }));
+      toast.success('Image uploaded successfully');
+    } catch (error) {
+      toast.error('Failed to upload image');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeDesignImage = (designIdx, imgIndex) => {
+    setFormData(prev => ({
+      ...prev,
+      designs: prev.designs.map((d, i) => {
+        if (i !== designIdx) return d;
+        return { ...d, images: d.images.filter((_, j) => j !== imgIndex) };
+      })
+    }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // Drop designs the admin left with an empty name — they'd be ignored
+    // server-side anyway; sending a clean array keeps the record tidy.
+    const payload = {
+      ...formData,
+      designs: (formData.designs || [])
+        .filter(d => (d.name || '').trim())
+        .map(d => ({
+          name: d.name.trim(),
+          description: d.description || '',
+          video_link: d.video_link || '',
+          images: d.images || []
+        }))
+    };
     try {
       if (editProduct) {
-        await adminAPI.updateProduct(editProduct.id, formData);
+        await adminAPI.updateProduct(editProduct.id, payload);
         toast.success('Product updated');
       } else {
-        await adminAPI.createProduct(formData);
+        await adminAPI.createProduct(payload);
         toast.success('Product created');
       }
       setShowModal(false);
       setEditProduct(null);
-      setFormData({ name: '', description: '', price: '', daily_amount: '50', days: '15', image: '', images: [], youtube_link: '', is_active: true });
+      setFormData(emptyForm());
       fetchProducts();
     } catch (error) {
       toast.error('Failed to save product');
@@ -287,11 +396,20 @@ const AdminProducts = () => {
       name: product.name,
       description: product.description || '',
       price: product.price,
-      daily_amount: product.daily_amount || product.salary_amount || '50',
-      days: product.days || product.salary_duration || '15',
       image: product.image || '',
       images: productImages,
       youtube_link: product.youtube_link || '',
+      rank_name: product.rank_name || '',
+      rank_order: product.rank_order || 0,
+      level_income: parseLevelIncome(product.level_income),
+      designs: Array.isArray(product.designs)
+        ? product.designs.map(d => ({
+            name: d.name || '',
+            description: d.description || '',
+            video_link: d.video_link || '',
+            images: Array.isArray(d.images) ? d.images : []
+          }))
+        : [],
       is_active: product.is_active
     });
     setShowModal(true);
@@ -311,7 +429,7 @@ const AdminProducts = () => {
 
   const openCreateModal = () => {
     setEditProduct(null);
-    setFormData({ name: '', description: '', price: '', daily_amount: '50', days: '15', image: '', images: [], is_active: true });
+    setFormData(emptyForm());
     setShowModal(true);
   };
 
@@ -392,22 +510,16 @@ const AdminProducts = () => {
       render: (value) => <span className="price-cell">₹{(parseFloat(value) || 0).toLocaleString()}</span>
     },
     {
-      key: 'daily_amount',
-      label: 'Daily Incentive',
-      render: (value, row) => (
-        <div className="salary-cell">
-          <span className="salary-amount">₹{parseFloat(value || row.salary_amount || 50).toLocaleString()}</span>
-          <span className="salary-duration">/ {row.days || row.salary_duration || 15} days</span>
-        </div>
+      key: 'rank_name',
+      label: 'Rank',
+      render: (value, row) => value ? (
+        <span className="rank-cell">
+          ★ {value}
+          <span className="rank-order-mini">#{row.rank_order || '-'}</span>
+        </span>
+      ) : (
+        <span className="no-video">—</span>
       )
-    },
-    {
-      key: 'total_payout',
-      label: 'Total Payout',
-      render: (value, row) => {
-        const total = (parseFloat(row.daily_amount || row.salary_amount || 50) * parseInt(row.days || row.salary_duration || 15));
-        return <span className="payout-cell">₹{total.toLocaleString()}</span>;
-      }
     },
     {
       key: 'youtube_link',
@@ -459,7 +571,7 @@ const AdminProducts = () => {
         <div className="page-header">
           <div>
             <h1 className="page-title">Product Management</h1>
-            <p className="page-subtitle">Configure products and their incentive benefits</p>
+            <p className="page-subtitle">Configure products available for purchase</p>
           </div>
           <div className="page-header-actions">
             <div className="view-toggle">
@@ -491,8 +603,6 @@ const AdminProducts = () => {
               columns={[
                 { key: 'name', label: 'Name' },
                 { key: 'price', label: 'Price' },
-                { key: 'days', label: 'Days' },
-                { key: 'daily_amount', label: 'Daily Amount' },
                 { key: 'is_active', label: 'Active' }
               ]}
               filename="products-export"
@@ -546,28 +656,16 @@ const AdminProducts = () => {
                       </span>
                     </div>
                   <div className="product-content">
-                    <h3 className="product-name">{product.name}</h3>
+                    <h3 className="product-name">
+                      {product.name}
+                      {product.rank_name && <span className="rank-chip">★ {product.rank_name}</span>}
+                    </h3>
                     <p className="product-description">{product.description || 'No description'}</p>
 
                     <div className="product-price-row">
                       <div className="price-info">
                         <span className="product-price">₹{(parseFloat(product.price) || 0).toLocaleString()}</span>
                         <span className="price-label">Price</span>
-                      </div>
-                    </div>
-
-                    <div className="salary-info-card">
-                      <div className="salary-item">
-                        <span className="salary-label">Daily Incentive</span>
-                        <span className="salary-value">₹{parseFloat(product.daily_amount || product.salary_amount || 50).toLocaleString()}</span>
-                      </div>
-                      <div className="salary-item">
-                        <span className="salary-label">Days</span>
-                        <span className="salary-value">{product.days || product.salary_duration || 15} days</span>
-                      </div>
-                      <div className="salary-item highlight">
-                        <span className="salary-label">Total Payout</span>
-                        <span className="salary-value">₹{(parseFloat(product.daily_amount || product.salary_amount || 50) * parseInt(product.days || product.salary_duration || 15)).toLocaleString()}</span>
                       </div>
                     </div>
 
@@ -715,43 +813,150 @@ const AdminProducts = () => {
                 min="0"
               />
             </div>
+            <div className="form-group">
+              <label className="form-label">Rank Name</label>
+              <input
+                type="text"
+                className="form-input"
+                value={formData.rank_name}
+                onChange={(e) => setFormData({ ...formData, rank_name: e.target.value })}
+                placeholder="e.g. Star, Silver, Gold, Platinum"
+              />
+              <span className="form-hint">Shown as a badge on product cards (optional)</span>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Rank Order (tier for auto-upgrade)</label>
+            <input
+              type="number"
+              className="form-input"
+              value={formData.rank_order}
+              onChange={(e) => setFormData({ ...formData, rank_order: parseInt(e.target.value) || 0 })}
+              min="0"
+              placeholder="1 = lowest rank"
+            />
+            <span className="form-hint">Auto-repurchase buys the next higher tier when the repurchase wallet affords it. Use 1, 2, 3, 4… (0 = not a rank)</span>
           </div>
 
-          {/* Incentive Configuration Section */}
-          <div className="salary-config-section">
-            <h4 className="section-title">💰 Incentive Configuration</h4>
-            <p className="section-desc">Configure the daily incentive benefits for referrers when this product is purchased</p>
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Daily Incentive Amount (₹)</label>
-                <input
-                  type="number"
-                  className="form-input"
-                  value={formData.daily_amount}
-                  onChange={(e) => setFormData({ ...formData, daily_amount: e.target.value })}
-                  min="0"
-                  placeholder="50"
-                />
-                <span className="form-hint">Amount credited daily to referrer's earning wallet</span>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Days</label>
-                <input
-                  type="number"
-                  className="form-input"
-                  value={formData.days}
-                  onChange={(e) => setFormData({ ...formData, days: e.target.value })}
-                  min="1"
-                  max="365"
-                  placeholder="15"
-                />
-                <span className="form-hint">Number of days incentive is paid</span>
-              </div>
+          <div className="form-group">
+            <label className="form-label">Team Income Per Level (₹) — 10 levels</label>
+            <div className="levels-grid-form">
+              {(formData.level_income || []).map((amt, idx) => (
+                <div className="level-input-item" key={idx}>
+                  <label className="form-label">L{idx + 1}</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={amt}
+                    min="0"
+                    step="0.01"
+                    onChange={(e) => {
+                      const next = [...formData.level_income];
+                      next[idx] = parseFloat(e.target.value) || 0;
+                      setFormData({ ...formData, level_income: next });
+                    }}
+                  />
+                </div>
+              ))}
             </div>
-            <div className="salary-preview">
-              <span className="preview-label">Total Payout per Referral:</span>
-              <span className="preview-value">₹{((parseFloat(formData.daily_amount) || 50) * (parseInt(formData.days) || 15)).toLocaleString()}</span>
-            </div>
+            <span className="form-hint">
+              Paid to upline L1–L10 when someone purchases this rank. Set 0 to disable a level (e.g. Gold L8).
+              Total per purchase: ₹{(formData.level_income || []).reduce((s, v) => s + (parseFloat(v) || 0), 0).toLocaleString()}
+            </span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Product Designs (Optional)</label>
+            <span className="form-hint" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+              Add design variants (e.g. Design 1, Design 2). Buyers must pick one before purchasing.
+              Leave empty if this product has no variants.
+            </span>
+            {(formData.designs || []).map((design, designIdx) => (
+              <div className="design-editor" key={designIdx}>
+                <div className="design-editor-header">
+                  <span className="design-editor-title">Design {designIdx + 1}</span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm text-danger"
+                    onClick={() => removeDesign(designIdx)}
+                  >
+                    🗑️ Remove
+                  </button>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Design Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={design.name}
+                      onChange={(e) => updateDesignField(designIdx, 'name', e.target.value)}
+                      placeholder="e.g. Design 1 — Grey"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Short Description</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={design.description}
+                      onChange={(e) => updateDesignField(designIdx, 'description', e.target.value)}
+                      placeholder="Short description shown to the buyer"
+                    />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">YouTube Video Link (optional)</label>
+                  <input
+                    type="url"
+                    className="form-input"
+                    value={design.video_link}
+                    onChange={(e) => updateDesignField(designIdx, 'video_link', e.target.value)}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                  />
+                  <span className="form-hint">Shown to buyers when they select this design</span>
+                </div>
+                <div className="image-upload-container">
+                  <div className="images-grid">
+                    {(design.images || []).map((img, imgIdx) => (
+                      <div key={imgIdx} className="image-preview-item">
+                        <img src={getImageUrl(img)} alt={`Design ${designIdx + 1} image ${imgIdx + 1}`} />
+                        <button
+                          type="button"
+                          className="remove-image"
+                          onClick={() => removeDesignImage(designIdx, imgIdx)}
+                        >
+                          ×
+                        </button>
+                        <label className="replace-btn">
+                          Replace
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleDesignImageUpload(e, designIdx, imgIdx)}
+                            style={{ display: 'none' }}
+                          />
+                        </label>
+                      </div>
+                    ))}
+                    {(design.images || []).length < 5 && (
+                      <label className="upload-box">
+                        + Add Image
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleDesignImageUpload(e, designIdx)}
+                          style={{ display: 'none' }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            <button type="button" className="btn btn-secondary btn-sm" onClick={addDesign}>
+              + Add Design
+            </button>
           </div>
 
           <div className="form-group">
@@ -966,46 +1171,6 @@ const AdminProducts = () => {
           color: var(--gray-500);
         }
 
-        .salary-info-card {
-          background: var(--gray-50);
-          border-radius: var(--radius-lg);
-          padding: 0.75rem;
-          margin-bottom: 0.75rem;
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 0.5rem;
-        }
-
-        .salary-item {
-          text-align: center;
-        }
-
-        .salary-item.highlight {
-          background: var(--accent-50);
-          margin: -0.25rem;
-          padding: 0.25rem;
-          border-radius: var(--radius-md);
-        }
-
-        .salary-label {
-          display: block;
-          font-size: 0.625rem;
-          color: var(--gray-500);
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        .salary-value {
-          display: block;
-          font-size: 0.9375rem;
-          font-weight: 600;
-          color: var(--gray-900);
-        }
-
-        .salary-item.highlight .salary-value {
-          color: var(--accent-600);
-        }
-
         .product-actions {
           display: flex;
           gap: 0.5rem;
@@ -1204,24 +1369,71 @@ const AdminProducts = () => {
           color: var(--primary-600);
         }
 
-        .salary-cell {
-          display: flex;
-          flex-direction: column;
-        }
-
-        .salary-amount {
-          font-weight: 600;
-          color: var(--gray-900);
-        }
-
-        .salary-duration {
+        .rank-cell {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.375rem;
+          padding: 0.25rem 0.625rem;
+          background: #fef3c7;
+          color: #b45309;
+          border-radius: var(--radius-full);
           font-size: 0.75rem;
-          color: var(--gray-500);
+          font-weight: 600;
         }
 
-        .payout-cell {
+        .rank-order-mini {
+          font-size: 0.65rem;
+          opacity: 0.7;
+        }
+
+        .rank-chip {
+          display: inline-block;
+          margin-left: 0.5rem;
+          padding: 0.15rem 0.5rem;
+          background: #fef3c7;
+          color: #b45309;
+          border-radius: 999px;
+          font-size: 0.6875rem;
           font-weight: 600;
-          color: var(--accent-600);
+          vertical-align: middle;
+          white-space: nowrap;
+        }
+
+        .levels-grid-form {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 0.5rem;
+        }
+
+        .design-editor {
+          border: 1px solid var(--gray-200);
+          border-radius: var(--radius-lg);
+          padding: 0.875rem;
+          margin-bottom: 0.75rem;
+          background: var(--gray-50, #f9fafb);
+        }
+
+        .design-editor-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 0.5rem;
+        }
+
+        .design-editor-title {
+          font-size: 0.875rem;
+          font-weight: 600;
+          color: var(--gray-800, #1f2937);
+        }
+
+        .design-editor .form-group {
+          margin-bottom: 0.5rem;
+        }
+
+        .level-input-item .form-label {
+          font-size: 0.7rem;
+          font-weight: 600;
+          color: var(--primary-700, #1d4ed8);
         }
 
         .status-toggle {
@@ -1361,15 +1573,6 @@ const AdminProducts = () => {
           margin: 0;
         }
 
-        /* Incentive Configuration Section */
-        .salary-config-section {
-          background: var(--gray-50);
-          border-radius: var(--radius-lg);
-          padding: 1.25rem;
-          margin: 1rem 0;
-          border: 1px solid var(--gray-200);
-        }
-
         .section-title {
           font-size: 1rem;
           font-weight: 600;
@@ -1383,15 +1586,6 @@ const AdminProducts = () => {
           margin: 0 0 1rem 0;
         }
 
-        .salary-preview {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 0.75rem 1rem;
-          background: var(--accent-50);
-          border-radius: var(--radius-md);
-          margin-top: 0.5rem;
-        }
 
         .preview-label {
           font-size: 0.875rem;
@@ -1631,17 +1825,12 @@ const AdminProducts = () => {
             grid-template-columns: 1fr;
           }
 
-          .salary-info-card {
-            grid-template-columns: 1fr;
-            gap: 0.5rem;
-          }
-
-          .salary-item.highlight {
-            margin: 0;
-          }
-
           .images-grid {
             grid-template-columns: repeat(2, 1fr);
+          }
+
+          .levels-grid-form {
+            grid-template-columns: repeat(4, 1fr);
           }
         }
       `}</style>

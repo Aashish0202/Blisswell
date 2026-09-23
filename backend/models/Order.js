@@ -1,21 +1,30 @@
 const pool = require('../config/db');
-const { generateInvoiceNumber } = require('../utils/helpers');
+const { allocateInvoiceNumber } = require('../utils/helpers');
 
 const Order = {
-  // Create order
+  // Create order. Call only with an ALREADY-CONFIRMED payment (status should
+  // not be 'processing'/'failed') — the invoice number is allocated here.
   async create(orderData, connection = pool) {
-    const { user_id, product_id, amount, payment_type } = orderData;
+    const { user_id, product_id, amount, payment_type, status, order_source, source_withdrawal_id } = orderData;
     const conn = connection;
 
-    // Generate invoice number with new format
-    const invoiceNumber = await generateInvoiceNumber(conn, user_id);
+    const invoiceNumber = await allocateInvoiceNumber(conn);
 
     const [result] = await conn.execute(
-      `INSERT INTO orders (user_id, product_id, amount, payment_type, order_number)
-       VALUES (?, ?, ?, ?, ?)`,
-      [user_id, product_id, amount, payment_type, invoiceNumber]
+      `INSERT INTO orders (user_id, product_id, amount, payment_type, status, order_source, source_withdrawal_id, order_number)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        user_id,
+        product_id,
+        amount,
+        payment_type,
+        status || 'pending',
+        order_source || 'user',
+        source_withdrawal_id || null,
+        invoiceNumber
+      ]
     );
-    return result.insertId;
+    return { id: result.insertId, order_number: invoiceNumber };
   },
 
   // Get order by ID
@@ -39,7 +48,7 @@ const Order = {
        FROM orders o
        LEFT JOIN products p ON o.product_id = p.id
        WHERE o.user_id = ?
-         AND o.status IN ('delivered', 'shipped', 'cancelled')
+         AND o.status IN ('pending', 'delivered', 'shipped', 'cancelled')
        ORDER BY o.created_at DESC
        LIMIT ? OFFSET ?`,
       [userId, limit, offset]
@@ -51,7 +60,7 @@ const Order = {
   async countByUserId(userId) {
     const [rows] = await pool.execute(
       `SELECT COUNT(*) as total FROM orders
-       WHERE user_id = ? AND status IN ('delivered', 'shipped', 'cancelled')`,
+       WHERE user_id = ? AND status IN ('pending', 'delivered', 'shipped', 'cancelled')`,
       [userId]
     );
     return rows[0].total;
@@ -83,12 +92,13 @@ const Order = {
     `;
     const params = [];
 
-    // By default only show orders with a completed payment flow (delivered, shipped,
-    // cancelled-after-delivery). Orders where payment was merely initiated but never
-    // completed (processing / pending / failed) are hidden — they should not appear
-    // in the orders list. When an admin explicitly filters by a status, honor it.
+    // By default only show orders with a completed payment flow (pending-shipment,
+    // shipped, delivered, cancelled-after-delivery). Orders where payment was
+    // merely initiated but never completed (processing / failed) are hidden —
+    // they should not appear in the orders list. When an admin explicitly
+    // filters by a status, honor it.
     if (!filters.status) {
-      query += " AND o.status IN ('delivered', 'shipped', 'cancelled')";
+      query += " AND o.status IN ('pending', 'delivered', 'shipped', 'cancelled')";
     }
 
     if (filters.status) {
@@ -122,7 +132,7 @@ const Order = {
 
     // By default only count orders with a completed payment flow (see getAll).
     if (!filters.status) {
-      query += " AND status IN ('delivered', 'shipped', 'cancelled')";
+      query += " AND status IN ('pending', 'delivered', 'shipped', 'cancelled')";
     }
 
     if (filters.status) {
@@ -211,9 +221,10 @@ const Order = {
   },
 
   // Get total sales (only orders that actually completed payment; abandoned /
-  // failed / pending-payment orders never generated revenue and must be excluded)
+  // failed / processing orders never generated revenue and must be excluded.
+  // 'pending' = paid but awaiting shipment, so it still counts as revenue)
   async getTotalSales(startDate = null, endDate = null) {
-    let query = "SELECT SUM(amount) as total FROM orders WHERE status IN ('delivered', 'shipped')";
+    let query = "SELECT SUM(amount) as total FROM orders WHERE status IN ('pending', 'delivered', 'shipped')";
     const params = [];
 
     if (startDate && endDate) {
@@ -240,7 +251,7 @@ const Order = {
       `SELECT o.*, u.name as user_name
        FROM orders o
        LEFT JOIN users u ON o.user_id = u.id
-       WHERE o.status IN ('delivered', 'shipped', 'cancelled')
+       WHERE o.status IN ('pending', 'delivered', 'shipped', 'cancelled')
        ORDER BY o.created_at DESC
        LIMIT ?`,
       [limit]

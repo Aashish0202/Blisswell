@@ -38,7 +38,8 @@ import UserDashboard from './pages/user/Dashboard';
 import Wallet from './pages/user/Wallet';
 import Orders from './pages/user/Orders';
 import Referrals from './pages/user/Referrals';
-import Salary from './pages/user/Salary';
+import Earnings from './pages/user/Earnings';
+import Withdrawal from './pages/user/Withdrawal';
 import Profile from './pages/user/Profile';
 import Support from './pages/user/Support';
 import IdCard from './pages/user/IdCard';
@@ -46,17 +47,13 @@ import AdminDashboard from './pages/admin/Dashboard';
 import AdminUsers from './pages/admin/Users';
 import AdminOrders from './pages/admin/Orders';
 import AdminProducts from './pages/admin/Products';
-import AdminSalary from './pages/admin/Salary';
+import AdminWithdrawals from './pages/admin/Withdrawals';
 import AdminReports from './pages/admin/Reports';
 import AdminSettings from './pages/admin/Settings';
 import AdminWalletDeposit from './pages/admin/WalletDeposit';
 import AdminTickets from './pages/admin/Tickets';
 import AdminGallery from './pages/admin/Gallery';
-import AdminBonus from './pages/admin/Bonus';
 import NotFound from './pages/NotFound';
-import ImageTest from './pages/user/ImageTest';
-
-// Admin icon component for bonus
 
 // Auth loader component to verify token on app start
 const AuthLoader = ({ children }) => {
@@ -92,9 +89,9 @@ const AppLayout = ({ children }) => {
 
   // Pages that use app layout (no header/footer)
   const appPages = [
-    '/dashboard', '/wallet', '/orders', '/referrals', '/salary', '/profile', '/support', '/id-card',
+    '/dashboard', '/wallet', '/orders', '/referrals', '/earnings', '/withdrawal', '/profile', '/support', '/id-card',
     '/change-password', '/admin', '/admin/users', '/admin/orders', '/admin/products',
-    '/admin/salary', '/admin/bonus', '/admin/reports', '/admin/settings', '/admin/wallet-deposit', '/admin/tickets',
+    '/admin/withdrawals', '/admin/reports', '/admin/settings', '/admin/wallet-deposit', '/admin/tickets',
     '/admin/gallery'
   ];
 
@@ -144,7 +141,6 @@ function App() {
                   <Route path="/register" element={<Register />} />
                   <Route path="/forgot-password" element={<ForgotPassword />} />
                   <Route path="/reset-password/:token" element={<ResetPassword />} />
-                  <Route path="/image-test" element={<ImageTest />} />
 
                   {/* User Protected Routes */}
                   <Route path="/dashboard" element={
@@ -167,9 +163,14 @@ function App() {
                       <Referrals />
                     </ProtectedRoute>
                   } />
-                  <Route path="/salary" element={
+                  <Route path="/earnings" element={
                     <ProtectedRoute>
-                      <Salary />
+                      <Earnings />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="/withdrawal" element={
+                    <ProtectedRoute>
+                      <Withdrawal />
                     </ProtectedRoute>
                   } />
                   <Route path="/profile" element={
@@ -216,12 +217,17 @@ function App() {
                       <AdminProducts />
                     </AdminRoute>
                   } />
-                  <Route path="/admin/salary" element={
+                  <Route path="/admin/withdrawals" element={
                     <AdminRoute>
-                      <AdminSalary />
+                      <AdminWithdrawals />
                     </AdminRoute>
                   } />
                   <Route path="/admin/reports" element={
+                    <AdminRoute>
+                      <AdminReports />
+                    </AdminRoute>
+                  } />
+                  <Route path="/admin/reports/:reportType" element={
                     <AdminRoute>
                       <AdminReports />
                     </AdminRoute>
@@ -244,11 +250,6 @@ function App() {
                   <Route path="/admin/gallery" element={
                     <AdminRoute>
                       <AdminGallery />
-                    </AdminRoute>
-                  } />
-                  <Route path="/admin/bonus" element={
-                    <AdminRoute>
-                      <AdminBonus />
                     </AdminRoute>
                   } />
 

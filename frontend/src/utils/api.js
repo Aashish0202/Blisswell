@@ -61,11 +61,21 @@ export const userAPI = {
   getReferrals: (page) => api.get(`/user/referrals${page ? `?page=${page}` : ''}`),
   getReferralSummary: () => api.get('/user/referrals/summary'),
   getReferralPurchases: (id) => api.get(`/user/referrals/${id}/purchases`),
-  getSalaryCycles: (page) => api.get(`/user/salary-cycles?page=${page}`),
-  getPayouts: (page) => api.get(`/user/payouts?page=${page}`),
-  getSalarySummary: () => api.get('/user/salary/summary'),
+  getDownlineTeam: (page, filters) => api.get(`/user/team/downline?page=${page}`, { params: filters }),
+  // Level income + withdrawals (rank/repurchase model)
   getEarnings: () => api.get('/user/earnings'),
+  getEarningsBreakdown: () => api.get('/user/earnings/breakdown'),
+  getTeamIncome: () => api.get('/user/team-income'),
+  getTeamIncomeHistory: (page, source = '') => api.get(`/user/team-income/history?page=${page}${source ? `&source=${source}` : ''}`),
   getWalletTransactions: (page) => api.get(`/user/wallet/transactions?page=${page}`)
+};
+
+// Withdrawal API (user-initiated)
+export const withdrawalAPI = {
+  request: (amount) => api.post('/withdrawals', { amount }),
+  getMyWithdrawals: (page) => api.get(`/withdrawals${page ? `?page=${page}` : ''}`),
+  getWithdrawalById: (id) => api.get(`/withdrawals/${id}`),
+  getConfig: () => api.get('/withdrawals/config')
 };
 
 // Wallet API
@@ -84,11 +94,11 @@ export const contactAPI = {
 // Order API
 export const orderAPI = {
   getProducts: () => api.get('/orders/products'),
-  purchaseProduct: (productId) => api.post('/orders/purchase', { product_id: productId }),
+  purchaseProduct: (productId, designName) => api.post('/orders/purchase', { product_id: productId, design_name: designName || null }),
   getMyOrders: (page) => api.get(`/orders/my-orders?page=${page}`),
   getOrderDetails: (id) => api.get(`/orders/${id}`),
   // Direct payment endpoints
-  createPaymentOrder: (productId) => api.post('/orders/create-payment-order', { product_id: productId }),
+  createPaymentOrder: (productId, designName) => api.post('/orders/create-payment-order', { product_id: productId, design_name: designName || null }),
   verifyAndPurchase: (data) => api.post('/orders/verify-and-purchase', data),
   recordCancelledPayment: (data) => api.post('/orders/record-cancelled', data),
   recordFailedPayment: (data) => api.post('/orders/record-failed', data),
@@ -110,31 +120,31 @@ export const adminAPI = {
   createProduct: (data) => api.post('/admin/products', data),
   updateProduct: (id, data) => api.put(`/admin/products/${id}`, data),
   deleteProduct: (id) => api.delete(`/admin/products/${id}`),
+  runAutoRepurchase: (userId) => api.post('/admin/auto-repurchase/run', { user_id: userId }),
   uploadProductImage: (formData) => api.post('/admin/products/upload-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
-  getSalaryCycles: (page, filters) => api.get(`/admin/salary/cycles?page=${page}`, { params: filters }),
-  getPayouts: (page, filters) => api.get(`/admin/salary/payouts?page=${page}`, { params: filters }),
-  getPayoutsWithKYC: (filters) => api.get('/admin/salary/payouts-with-kyc', { params: filters }),
-  exportPayoutsExcel: (filters) => api.get('/admin/salary/payouts/export-excel', { params: filters, responseType: 'blob' }),
-  updatePayoutStatus: (id, status) => api.put(`/admin/salary/payouts/${id}`, { status }),
-  bulkUpdatePayouts: (ids, status) => api.put('/admin/salary/payouts/bulk', { payout_ids: ids, status }),
-  getMonthlySummary: (month, year) => api.get(`/admin/salary/monthly-summary?month=${month}&year=${year}`),
-  getDailySummary: (date) => api.get(`/admin/salary/daily-summary${date ? `?date=${date}` : ''}`),
-  runClosing: () => api.post('/admin/salary/run-closing'),
+  // Reports (new income model)
   getSalesReport: (start, end) => api.get(`/admin/reports/sales?start_date=${start}&end_date=${end}`),
-  getSalaryReport: (year) => api.get(`/admin/reports/salary?year=${year}`),
-  getLiabilityReport: () => api.get('/admin/reports/liability'),
+  getTeamIncomeReport: (page, filters) => api.get(`/admin/reports/team-income?page=${page}`, { params: filters }),
+  getWithdrawalReport: (page, filters) => api.get(`/admin/reports/withdrawals?page=${page}`, { params: filters }),
+  getUserEarningsReport: (page, filters) => api.get(`/admin/reports/user-earnings?page=${page}`, { params: filters }),
   getReferralReport: (page, filters) => api.get(`/admin/reports/referrals?page=${page}`, { params: filters }),
   getWalletReport: (page, filters) => api.get(`/admin/reports/wallet?page=${page}`, { params: filters }),
   getUserFinancialReport: (page, filters) => api.get(`/admin/reports/user-financial?page=${page}`, { params: filters }),
-  getBusinessBonusReport: (page, filters) => api.get(`/admin/reports/business-bonus?page=${page}`, { params: filters }),
-  getBonusPayouts: (filters) => api.get('/admin/bonus/payouts', { params: filters }),
-  updateBonusPayoutStatus: (id, status) => api.put(`/admin/bonus/payouts/${id}`, { status }),
-  recalculateBonuses: () => api.post('/admin/bonus/recalculate'),
-  exportBonusPayoutsExcel: (filters) => api.get('/admin/bonus/payouts/export-excel', { params: filters, responseType: 'blob' }),
+  getRankReport: (page, filters) => api.get(`/admin/reports/ranks?page=${page}`, { params: filters }),
+  // User detailed report (active users list + single-user complete history)
+  getUserReportList: (page, filters) => api.get(`/admin/reports/user-list?page=${page}`, { params: filters }),
+  getUserDetailReport: (userId) => api.get(`/admin/reports/user-detail/${userId}`),
+  // Withdrawal processing (admin)
+  getAllWithdrawals: (page, filters) => api.get(`/withdrawals/admin/all?page=${page}`, { params: filters }),
+  processWithdrawal: (id) => api.put(`/withdrawals/admin/${id}/process`),
+  rejectWithdrawal: (id, reason) => api.put(`/withdrawals/admin/${id}/reject`, { reason }),
+  reverseWithdrawal: (id) => api.put(`/withdrawals/admin/${id}/reverse`),
+  // Settings (income settings + audit log)
   getSettings: () => api.get('/admin/settings'),
   updateSettings: (data) => api.put('/admin/settings', data),
+  getSettingsAuditLogs: (page) => api.get(`/admin/settings/audit${page ? `?page=${page}` : ''}`),
   getSiteSettings: () => api.get('/admin/site-settings'),
   updateSiteSettings: (data) => api.put('/admin/site-settings', data),
   uploadLogoImage: (formData) => api.post('/admin/site-settings/upload-logo', formData, {

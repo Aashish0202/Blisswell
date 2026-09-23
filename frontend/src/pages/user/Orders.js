@@ -97,6 +97,12 @@ const ImageSlider = ({ images, getImageUrl, alt, onImageClick }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const intervalRef = useRef(null);
 
+  // Reset to the first image whenever the image set changes (e.g. the
+  // buyer switches to another design tab on the product card).
+  useEffect(() => {
+    setCurrentIndex(0);
+  }, [images]);
+
   useEffect(() => {
     if (images && images.length > 1) {
       intervalRef.current = setInterval(() => {
@@ -156,6 +162,9 @@ const Orders = () => {
   const [userReferralCode, setUserReferralCode] = useState('');
   const [userGstNumber, setUserGstNumber] = useState('');
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
+  // Per-product selected design index (product id → design index), so
+  // clicking a design tab on a product card swaps that card's images.
+  const [selectedDesigns, setSelectedDesigns] = useState({});
   const [youtubeModal, setYoutubeModal] = useState({ isOpen: false, youtubeLink: '' });
   const invoiceRef = useRef(null);
   const { siteName, siteLogo, contact_address, contact_email, contact_phone, company_state } = useSiteSettings();
@@ -216,6 +225,10 @@ const Orders = () => {
       ...prev,
       [productId]: !prev[productId]
     }));
+  };
+
+  const selectProductDesign = (productId, designIdx) => {
+    setSelectedDesigns(prev => ({ ...prev, [productId]: designIdx }));
   };
 
   const openPurchaseDialog = (product) => {
@@ -300,7 +313,7 @@ const Orders = () => {
       igstAmount,
       totalGstAmount,
       isSameState,
-      invoiceNumber: order.order_number || `INV-${order.id}`,
+      invoiceNumber: order.order_number || `ORDER-${order.id}`,
       invoiceDate: order.created_at,
       productName: order.product_name || 'Product',
       productDescription: order.product_description || '',
@@ -371,18 +384,23 @@ const Orders = () => {
           {products.length > 0 ? (
             <div className="products-grid">
               {products.map((product, index) => {
-                const dailyAmount = parseFloat(product.daily_amount || product.salary_amount || 50);
-                const incentiveDays = parseInt(product.days || product.salary_duration || 15);
-                const totalPayout = dailyAmount * incentiveDays;
-
                 // Get images array or fallback to single image
                 const productImages = product.images && product.images.length > 0
                   ? product.images
                   : product.image ? [product.image] : [];
 
+                // Designs (optional variants): the selected design's images
+                // take over the card's image slider until it has images.
+                const productDesigns = Array.isArray(product.designs) ? product.designs : [];
+                const designIdx = selectedDesigns[product.id] ?? 0;
+                const selectedDesign = productDesigns[designIdx] || null;
+                const displayImages = selectedDesign && selectedDesign.images && selectedDesign.images.length > 0
+                  ? selectedDesign.images
+                  : productImages;
+
                 const openLightbox = () => {
-                  if (productImages.length > 0) {
-                    setLightbox({ isOpen: true, images: productImages, currentIndex: 0 });
+                  if (displayImages.length > 0) {
+                    setLightbox({ isOpen: true, images: displayImages, currentIndex: 0 });
                   }
                 };
 
@@ -392,11 +410,11 @@ const Orders = () => {
                     className="product-card-enhanced hover-lift animate-card"
                     style={{ animationDelay: `${index * 0.1}s` }}
                   >
-                    <div className="product-image-wrapper" onClick={openLightbox} style={{ cursor: productImages.length > 0 ? 'pointer' : 'default' }}>
+                    <div className="product-image-wrapper" onClick={openLightbox} style={{ cursor: displayImages.length > 0 ? 'pointer' : 'default' }}>
                       <ImageSlider
-                        images={productImages}
+                        images={displayImages}
                         getImageUrl={getImageUrl}
-                        alt={product.name}
+                        alt={selectedDesign ? `${product.name} - ${selectedDesign.name}` : product.name}
                         onImageClick={openLightbox}
                       />
                       {!product.is_active && (
@@ -405,8 +423,39 @@ const Orders = () => {
                         </div>
                       )}
                     </div>
+                    {productDesigns.length > 0 && (
+                      <div className="card-design-tabs">
+                        {productDesigns.map((d, i) => (
+                          <button
+                            key={`${d.name}-${i}`}
+                            type="button"
+                            className={`card-design-tab${i === designIdx ? ' active' : ''}`}
+                            onClick={() => selectProductDesign(product.id, i)}
+                          >
+                            {d.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {selectedDesign && selectedDesign.description && (
+                      <div className="card-design-desc">{selectedDesign.description}</div>
+                    )}
+                    {selectedDesign && selectedDesign.video_link && (
+                      <div className="card-design-video">
+                        <button
+                          className="watch-video-btn"
+                          onClick={() => setYoutubeModal({ isOpen: true, youtubeLink: selectedDesign.video_link })}
+                        >
+                          <span className="watch-video-icon">▶</span>
+                          Watch {selectedDesign.name} Video
+                        </button>
+                      </div>
+                    )}
                     <div className="product-content">
-                      <h4 className="product-title">{product.name}</h4>
+                      <h4 className="product-title">
+                        {product.name}
+                        {product.rank_name && <span className="rank-chip">★ {product.rank_name}</span>}
+                      </h4>
                       <div className={`product-desc-wrapper ${expandedDescriptions[product.id] ? 'expanded' : ''}`}>
                         <p className="product-desc">
                           {product.description || 'Premium quality product'}
@@ -421,27 +470,25 @@ const Orders = () => {
                         )}
                       </div>
 
-                      {/* Salary Benefits Card */}
+                      {/* Product Benefits Card */}
                       <div className="salary-benefits-card">
                         <div className="benefit-header">
                           <span className="benefit-icon">💰</span>
-                          <span className="benefit-title">Daily Referral Incentive</span>
+                          <span className="benefit-title">Product Benefits</span>
                         </div>
                         <div className="benefit-details">
                           <div className="benefit-row">
-                            <span className="benefit-label">Daily Incentive</span>
-                            <span className="benefit-value">₹{dailyAmount.toLocaleString()}/day</span>
-                          </div>
-                          <div className="benefit-row">
-                            <span className="benefit-label">Duration</span>
-                            <span className="benefit-value">{incentiveDays} days</span>
+                            <span className="benefit-label">Rank</span>
+                            <span className="benefit-value">{product.rank_name || 'Rank Package'}</span>
                           </div>
                           <div className="benefit-row highlight">
-                            <span className="benefit-label">Total Earning</span>
-                            <span className="benefit-value total">₹{totalPayout.toLocaleString()}</span>
+                            <span className="benefit-label">Level Income</span>
+                            <span className="benefit-value total">
+                              {product.rank_name ? `${product.rank_name} · 10 levels` : '10 levels per rank'}
+                            </span>
                           </div>
                         </div>
-                        <p className="benefit-note">Per active referral who purchases this product</p>
+                        <p className="benefit-note">Income from your team's purchases & auto rank upgrades</p>
                       </div>
 
                       {product.youtube_link && (
@@ -509,7 +556,8 @@ const Orders = () => {
                         </span>
                       </div>
                       <div className="order-meta">
-                        <span className="order-number">#{order.order_number}</span>
+                        {/* Invoice number exists only after payment confirmation */}
+                        <span className="order-number">{order.order_number ? `#${order.order_number}` : 'Payment not confirmed'}</span>
                         <span className="order-date">{new Date(order.created_at).toLocaleDateString()}</span>
                       </div>
                     </div>
@@ -517,12 +565,14 @@ const Orders = () => {
                       <div className="order-amount">
                         ₹{parseFloat(order.amount).toLocaleString()}
                       </div>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => openInvoice(order)}
-                      >
-                        View Invoice
-                      </button>
+                      {order.order_number && (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => openInvoice(order)}
+                        >
+                          View Invoice
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -532,7 +582,7 @@ const Orders = () => {
             <EmptyState
               icon="📦"
               title="No orders yet"
-              description="Purchase your first product to start earning referral salary"
+              description="Purchase your first rank package to activate your account and earn level income"
               action={{
                 label: 'Browse Products',
                 onClick: () => window.scrollTo({ top: 0, behavior: 'smooth' }),
@@ -801,7 +851,7 @@ const Orders = () => {
           inset: 0;
           border-radius: inherit;
           padding: 2px;
-          background: linear-gradient(135deg, #2563eb, #059669);
+          background: linear-gradient(135deg, #073C39, #5D8172);
           -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
           -webkit-mask-composite: xor;
                   mask-composite: exclude;
@@ -990,6 +1040,47 @@ const Orders = () => {
           font-size: 0.875rem;
         }
 
+        /* Design tabs on product cards — swap the card's image slider */
+        .card-design-tabs {
+          display: flex;
+          gap: 0.4rem;
+          flex-wrap: wrap;
+          padding: 0.75rem 1.25rem 0;
+        }
+
+        .card-design-tab {
+          padding: 0.35rem 0.7rem;
+          border: 1px solid var(--gray-200);
+          background: var(--gray-50, #f9fafb);
+          color: var(--gray-600, #4b5563);
+          border-radius: 999px;
+          font-size: 0.75rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .card-design-tab:hover {
+          border-color: var(--primary-500, #5D8172);
+          color: var(--primary-600, #073C39);
+        }
+
+        .card-design-tab.active {
+          background: var(--primary-600, #073C39);
+          border-color: var(--primary-600, #073C39);
+          color: white;
+        }
+
+        .card-design-desc {
+          padding: 0.35rem 1.25rem 0;
+          font-size: 0.75rem;
+          color: var(--gray-500, #6b7280);
+        }
+
+        .card-design-video {
+          padding: 0.5rem 1.25rem 0;
+        }
+
         .product-content {
           padding: 1.25rem;
         }
@@ -999,6 +1090,19 @@ const Orders = () => {
           font-weight: 600;
           color: var(--gray-900);
           margin-bottom: 0.5rem;
+        }
+
+        .rank-chip {
+          display: inline-block;
+          margin-left: 0.5rem;
+          padding: 0.15rem 0.5rem;
+          background: var(--primary-50, #F1F5F1);
+          color: var(--primary-700, #0B4541);
+          border-radius: 999px;
+          font-size: 0.6875rem;
+          font-weight: 600;
+          vertical-align: middle;
+          white-space: nowrap;
         }
 
         .product-desc-wrapper {
@@ -1505,7 +1609,7 @@ const Orders = () => {
         }
 
         .status-delivered { background: #dcfce7; color: #166534; }
-        .status-shipped { background: #dbeafe; color: #1e40af; }
+        .status-shipped { background: #E3EDE4; color: #073C39; }
         .status-processing { background: #fef3c7; color: #92400e; }
         .status-pending { background: #f3f4f6; color: #374151; }
         .status-cancelled { background: #fee2e2; color: #991b1b; }
@@ -1529,8 +1633,8 @@ const Orders = () => {
         }
 
         .gst-intra {
-          background: #dbeafe;
-          color: #1e40af;
+          background: #E3EDE4;
+          color: #073C39;
         }
 
         .gst-inter {
@@ -1562,8 +1666,8 @@ const Orders = () => {
         }
 
         .gst-inter {
-          background: #dbeafe;
-          color: #1e40af;
+          background: #E3EDE4;
+          color: #073C39;
         }
 
         /* Buyer Section */
