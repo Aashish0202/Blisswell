@@ -39,6 +39,7 @@ import Wallet from './pages/user/Wallet';
 import Orders from './pages/user/Orders';
 import Referrals from './pages/user/Referrals';
 import Earnings from './pages/user/Earnings';
+import Rewards from './pages/user/Rewards';
 import Withdrawal from './pages/user/Withdrawal';
 import Profile from './pages/user/Profile';
 import Support from './pages/user/Support';
@@ -48,11 +49,14 @@ import AdminUsers from './pages/admin/Users';
 import AdminOrders from './pages/admin/Orders';
 import AdminProducts from './pages/admin/Products';
 import AdminWithdrawals from './pages/admin/Withdrawals';
+import AdminPaymentRequests from './pages/admin/PaymentRequests';
+import AdminRewards from './pages/admin/Rewards';
 import AdminReports from './pages/admin/Reports';
 import AdminSettings from './pages/admin/Settings';
 import AdminWalletDeposit from './pages/admin/WalletDeposit';
 import AdminTickets from './pages/admin/Tickets';
 import AdminGallery from './pages/admin/Gallery';
+import AdminOfferBanners from './pages/admin/OfferBanners';
 import NotFound from './pages/NotFound';
 
 // Auth loader component to verify token on app start
@@ -92,10 +96,14 @@ const AppLayout = ({ children }) => {
     '/dashboard', '/wallet', '/orders', '/referrals', '/earnings', '/withdrawal', '/profile', '/support', '/id-card',
     '/change-password', '/admin', '/admin/users', '/admin/orders', '/admin/products',
     '/admin/withdrawals', '/admin/reports', '/admin/settings', '/admin/wallet-deposit', '/admin/tickets',
-    '/admin/gallery'
+    '/admin/gallery', '/admin/offer-banners'
   ];
 
+  // Auth pages keep the header but drop the footer
+  const noFooterPages = ['/login', '/register'];
+
   const isAppPage = appPages.some(page => location.pathname.startsWith(page));
+  const hideFooter = noFooterPages.includes(location.pathname);
 
   if (isAppPage) {
     // App layout - no header/footer, DashboardLayout handles navigation
@@ -107,7 +115,7 @@ const AppLayout = ({ children }) => {
     <>
       <Header />
       <main>{children}</main>
-      <Footer />
+      {!hideFooter && <Footer />}
     </>
   );
 };
@@ -168,6 +176,11 @@ function App() {
                       <Earnings />
                     </ProtectedRoute>
                   } />
+                  <Route path="/rewards" element={
+                    <ProtectedRoute>
+                      <Rewards />
+                    </ProtectedRoute>
+                  } />
                   <Route path="/withdrawal" element={
                     <ProtectedRoute>
                       <Withdrawal />
@@ -222,6 +235,16 @@ function App() {
                       <AdminWithdrawals />
                     </AdminRoute>
                   } />
+                  <Route path="/admin/rewards" element={
+                    <AdminRoute>
+                      <AdminRewards />
+                    </AdminRoute>
+                  } />
+                  <Route path="/admin/payment-requests" element={
+                    <AdminRoute>
+                      <AdminPaymentRequests />
+                    </AdminRoute>
+                  } />
                   <Route path="/admin/reports" element={
                     <AdminRoute>
                       <AdminReports />
@@ -250,6 +273,11 @@ function App() {
                   <Route path="/admin/gallery" element={
                     <AdminRoute>
                       <AdminGallery />
+                    </AdminRoute>
+                  } />
+                  <Route path="/admin/offer-banners" element={
+                    <AdminRoute>
+                      <AdminOfferBanners />
                     </AdminRoute>
                   } />
 

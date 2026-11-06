@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
 const Gallery = require('../models/Gallery');
+const OfferBanner = require('../models/OfferBanner');
 const { verifyToken, isAdmin } = require('../middleware/auth');
-const { uploadProductImage, uploadLogoImage, uploadGalleryImage } = require('../middleware/upload');
+const { uploadProductImage, uploadLogoImage, uploadGalleryImage, uploadBannerImage } = require('../middleware/upload');
 
 // All routes are protected and admin only
 router.use(verifyToken);
@@ -42,13 +43,11 @@ router.put('/products/:id', adminController.updateProduct);
 router.delete('/products/:id', adminController.deleteProduct);
 router.post('/products/upload-image', uploadProductImage.single('image'), adminController.uploadProductImage);
 
-// Auto-repurchase engine (admin trigger / testing)
-router.post('/auto-repurchase/run', adminController.runAutoRepurchase);
-
 // Reports (new income model)
 router.get('/reports/sales', adminController.getSalesReport);
 router.get('/reports/team-income', adminController.getTeamIncomeReport);
 router.get('/reports/withdrawals', adminController.getWithdrawalReport);
+router.get('/reports/reward-income', adminController.getRewardIncomeReport);
 router.get('/reports/user-earnings', adminController.getUserEarningsReport);
 router.get('/reports/referrals', adminController.getReferralReport);
 router.get('/reports/wallet', adminController.getWalletReport);
@@ -162,6 +161,127 @@ router.post('/gallery/upload-image', uploadGalleryImage.single('image'), (req, r
   res.json({ image_url: imageUrl });
 });
 
+// Offer Banners (shown on the user dashboard during start_at..end_at)
+const parseBannerDate = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+router.get('/offer-banners', async (req, res) => {
+  try {
+    const banners = await OfferBanner.getAll();
+    res.json({ banners });
+  } catch (error) {
+    console.error('Get offer banners error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/offer-banners', async (req, res) => {
+  try {
+    const { title, message, image_url, link_url, link_text, start_at, end_at, is_active, display_order } = req.body;
+    const start = parseBannerDate(start_at);
+    const end = parseBannerDate(end_at);
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ message: 'Title is required' });
+    }
+    if (!start || !end) {
+      return res.status(400).json({ message: 'Valid start and end date/time are required' });
+    }
+    if (end <= start) {
+      return res.status(400).json({ message: 'End time must be after start time' });
+    }
+
+    const id = await OfferBanner.create({
+      title: title.trim(),
+      message,
+      image_url,
+      link_url,
+      link_text,
+      start_at: start,
+      end_at: end,
+      is_active: is_active !== undefined ? !!is_active : true,
+      display_order: parseInt(display_order) || 0
+    });
+
+    const banner = await OfferBanner.findById(id);
+    res.status(201).json({ message: 'Offer banner created', banner });
+  } catch (error) {
+    console.error('Create offer banner error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.put('/offer-banners/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await OfferBanner.findById(id);
+    if (!existing) {
+      return res.status(404).json({ message: 'Offer banner not found' });
+    }
+
+    const { title, message, image_url, link_url, link_text, start_at, end_at, is_active, display_order } = req.body;
+    const updateData = {};
+    if (title !== undefined) {
+      if (!title || !title.trim()) return res.status(400).json({ message: 'Title is required' });
+      updateData.title = title.trim();
+    }
+    if (message !== undefined) updateData.message = message || null;
+    if (image_url !== undefined) updateData.image_url = image_url || null;
+    if (link_url !== undefined) updateData.link_url = link_url || null;
+    if (link_text !== undefined) updateData.link_text = link_text || null;
+    if (is_active !== undefined) updateData.is_active = !!is_active;
+    if (display_order !== undefined) updateData.display_order = parseInt(display_order) || 0;
+    if (start_at !== undefined) {
+      const start = parseBannerDate(start_at);
+      if (!start) return res.status(400).json({ message: 'Invalid start date/time' });
+      updateData.start_at = start;
+    }
+    if (end_at !== undefined) {
+      const end = parseBannerDate(end_at);
+      if (!end) return res.status(400).json({ message: 'Invalid end date/time' });
+      updateData.end_at = end;
+    }
+
+    const finalStart = updateData.start_at || new Date(existing.start_at);
+    const finalEnd = updateData.end_at || new Date(existing.end_at);
+    if (finalEnd <= finalStart) {
+      return res.status(400).json({ message: 'End time must be after start time' });
+    }
+
+    await OfferBanner.update(id, updateData);
+    const banner = await OfferBanner.findById(id);
+    res.json({ message: 'Offer banner updated', banner });
+  } catch (error) {
+    console.error('Update offer banner error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.delete('/offer-banners/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await OfferBanner.findById(id);
+    if (!existing) {
+      return res.status(404).json({ message: 'Offer banner not found' });
+    }
+    await OfferBanner.delete(id);
+    res.json({ message: 'Offer banner deleted' });
+  } catch (error) {
+    console.error('Delete offer banner error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/offer-banners/upload-image', uploadBannerImage.single('image'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'No image uploaded' });
+  }
+  res.json({ image_url: `/uploads/banners/${req.file.filename}` });
+});
+
 // Migrate invoice numbers to new format (BSW1000001XX)
 router.post('/migrate-invoices', async (req, res) => {
   const pool = require('../config/db');
@@ -219,5 +339,15 @@ router.post('/migrate-invoices', async (req, res) => {
     res.status(500).json({ success: false, message: 'Migration failed', error: error.message });
   }
 });
+
+// ── Milestone Rewards (Bike Fund 3x3 / Car Fund 5x5) ──
+const rewardController = require('../controllers/rewardController');
+router.get('/reward-plans', rewardController.listPlans);
+router.post('/reward-plans', rewardController.createPlan);
+router.put('/reward-plans/:id', rewardController.updatePlan);
+router.delete('/reward-plans/:id', rewardController.deletePlan);
+router.get('/rewards/report', rewardController.getReport);
+router.post('/rewards/recompute/:user', rewardController.recomputeUser);
+router.post('/rewards/reconcile', rewardController.reconcileAll);
 
 module.exports = router;

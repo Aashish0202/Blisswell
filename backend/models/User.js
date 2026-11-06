@@ -1,4 +1,9 @@
 const pool = require('../config/db');
+const { PAID_ORDER_STATUSES } = require('./orderStatus');
+
+// Downline depth for team queries: 1..10 (the admin "Max Levels" setting).
+// Always an integer, so it is safe to inline into the recursive CTEs.
+const clampDepth = (n) => Math.min(10, Math.max(1, parseInt(n, 10) || 10));
 
 const User = {
   // Create new user
@@ -192,8 +197,8 @@ const User = {
         u.mobile,
         u.has_active_package,
         u.created_at,
-        COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as total_purchase,
-        COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as direct_business
+        COALESCE(SUM(CASE WHEN o.status IN (${PAID_ORDER_STATUSES}) THEN o.amount ELSE 0 END), 0) as total_purchase,
+        COALESCE(SUM(CASE WHEN o.status IN (${PAID_ORDER_STATUSES}) THEN o.amount ELSE 0 END), 0) as direct_business
        FROM users u
        LEFT JOIN orders o ON u.id = o.user_id
        WHERE u.referred_by = ?
@@ -206,17 +211,16 @@ const User = {
 
   // Get referrals with purchase info (direct referrals, paginated).
   // bonus_received removed (Business Bonus feature deleted).
+  // email/mobile not selected — this feeds the user's own Team page.
   async getReferralsWithBonus(userId, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     const [rows] = await pool.execute(
       `SELECT
         u.id,
         u.name,
-        u.email,
-        u.mobile,
         u.has_active_package,
         u.created_at,
-        COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as total_purchase,
+        COALESCE(SUM(CASE WHEN o.status IN (${PAID_ORDER_STATUSES}) THEN o.amount ELSE 0 END), 0) as total_purchase,
         0 as bonus_received
        FROM users u
        LEFT JOIN orders o ON u.id = o.user_id
@@ -230,10 +234,11 @@ const User = {
   },
 
   // Full 10-level downline tree (Team Income depth), with optional level
-  // filter and name/email/mobile/referral_code search. Walks the
+  // filter and name/referral_code search. Walks the
   // referred_by chain via a recursive CTE — MariaDB 10.2+ supports this.
-  async getDownline(userId, { page = 1, limit = 20, level = null, search = '' } = {}) {
+  async getDownline(userId, { page = 1, limit = 20, level = null, search = '', maxLevels = 10 } = {}) {
     const offset = (page - 1) * limit;
+    const depth = clampDepth(maxLevels);
     const params = [userId];
     let where = '1=1';
 
@@ -242,21 +247,28 @@ const User = {
       params.push(level);
     }
     if (search) {
-      where += ' AND (name LIKE ? OR email LIKE ? OR mobile LIKE ? OR referral_code LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+      // Search by name / referral code only — matching on email or mobile
+      // would let a user probe whether a phone number is in their team.
+      where += ' AND (name LIKE ? OR referral_code LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
     }
 
+    // email/mobile are not selected: team members' contact details are private.
     const cte = `
       WITH RECURSIVE downline AS (
-        SELECT id, name, email, mobile, referral_code, has_active_package,
-               rank_name, referred_by, created_at, 1 AS level
-        FROM users WHERE referred_by = ?
+        SELECT u.id, u.name, u.referral_code, u.has_active_package,
+               u.rank_name, u.referred_by, u.created_at, 1 AS level,
+               s.referral_code AS sponsor_code, s.name AS sponsor_name
+        FROM users u
+        JOIN users s ON s.id = u.referred_by
+        WHERE u.referred_by = ?
         UNION ALL
-        SELECT u.id, u.name, u.email, u.mobile, u.referral_code, u.has_active_package,
-               u.rank_name, u.referred_by, u.created_at, d.level + 1
+        SELECT u.id, u.name, u.referral_code, u.has_active_package,
+               u.rank_name, u.referred_by, u.created_at, d.level + 1,
+               d.referral_code, d.name
         FROM users u
         JOIN downline d ON u.referred_by = d.id
-        WHERE d.level < 10
+        WHERE d.level < ${depth}
       )
     `;
 
@@ -294,14 +306,20 @@ const User = {
   // Aggregated referral stats for the logged-in sponsor (used by the Referrals
   // page stat cards — correct across ALL referrals, not just the current page).
   // bonus_received replaced with qualified-direct count + team-income total.
-  async getReferralSummary(userId) {
+  async getReferralSummary(userId, maxLevels = 10) {
+    const depth = clampDepth(maxLevels);
+    // Orders are pre-aggregated per user so a referral with several orders
+    // is still counted once (a plain JOIN multiplied referral/active counts).
     const [rows] = await pool.execute(
       `SELECT
-        COUNT(u.id) as total_referrals,
+        COUNT(*) as total_referrals,
         SUM(CASE WHEN u.has_active_package = 1 THEN 1 ELSE 0 END) as active_referrals,
-        COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as total_direct_business
+        COALESCE(SUM(ob.amount), 0) as total_direct_business
        FROM users u
-       LEFT JOIN orders o ON u.id = o.user_id
+       LEFT JOIN (
+         SELECT user_id, SUM(CASE WHEN status IN (${PAID_ORDER_STATUSES}) THEN amount ELSE 0 END) AS amount
+         FROM orders GROUP BY user_id
+       ) ob ON ob.user_id = u.id
        WHERE u.referred_by = ?`,
       [userId]
     );
@@ -313,31 +331,55 @@ const User = {
     );
     const totalTeamIncome = parseFloat(ti[0].total) || 0;
 
-    // Total business across the full 10-level downline (not just directs) —
-    // every purchase/repurchase order placed by anyone in the tree.
+    // Total business across the visible downline (admin Max Levels, not just
+    // directs) — every purchase/repurchase order placed by anyone in it.
     const [[tb]] = await pool.execute(
       `WITH RECURSIVE downline AS (
         SELECT id, 1 AS level FROM users WHERE referred_by = ?
         UNION ALL
         SELECT u.id, d.level + 1 FROM users u
         JOIN downline d ON u.referred_by = d.id
-        WHERE d.level < 10
+        WHERE d.level < ${depth}
       )
-      SELECT COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.amount ELSE 0 END), 0) as total
+      SELECT COALESCE(SUM(CASE WHEN o.status IN (${PAID_ORDER_STATUSES}) THEN o.amount ELSE 0 END), 0) as total
       FROM downline d
       LEFT JOIN orders o ON o.user_id = d.id`,
       [userId]
     );
     const totalTeamBusiness = parseFloat(tb.total) || 0;
+    const team = await this.countTeam(userId, depth);
 
     return {
+      max_levels: depth,
       total_referrals: parseInt(r.total_referrals) || 0,
       active_referrals: parseInt(r.active_referrals) || 0,
+      team_total: team.total,
+      team_active: team.active,
       total_direct_business: parseFloat(r.total_direct_business) || 0,
       total_team_business: totalTeamBusiness,
       total_team_income: totalTeamIncome,
       total_bonus_received: 0
     };
+  },
+
+  // Whole team (10-level downline, Team Income depth): total members and
+  // how many of them have an active package.
+  async countTeam(userId, maxLevels = 10) {
+    const depth = clampDepth(maxLevels);
+    const [[row]] = await pool.execute(
+      `WITH RECURSIVE downline AS (
+        SELECT id, has_active_package, 1 AS level FROM users WHERE referred_by = ?
+        UNION ALL
+        SELECT u.id, u.has_active_package, d.level + 1 FROM users u
+        JOIN downline d ON u.referred_by = d.id
+        WHERE d.level < ${depth}
+      )
+      SELECT COUNT(*) AS total,
+             COALESCE(SUM(CASE WHEN has_active_package = 1 THEN 1 ELSE 0 END), 0) AS active
+      FROM downline`,
+      [userId]
+    );
+    return { total: parseInt(row.total, 10) || 0, active: parseInt(row.active, 10) || 0 };
   },
 
   // Count active referrals

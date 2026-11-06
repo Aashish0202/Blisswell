@@ -263,12 +263,11 @@ export const getSmartCards = (user, wallet, referrals) => {
   // Only show package/balance alerts if PAN is approved
   else if (panStatus === 'approved') {
     // Package status check
+    // (The "Low Wallet Balance / Add Funds" alert was removed from the dashboard.)
     if (!user.has_active_package) {
       const balance = parseFloat(wallet?.balance) || 0;
       const packagePrice = 599; // Door Mat product price
-      if (balance < packagePrice) {
-        cards.push({ type: 'low_balance', priority: 2 });
-      } else {
+      if (balance >= packagePrice) {
         cards.push({ type: 'no_package', priority: 1 });
       }
     }

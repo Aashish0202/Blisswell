@@ -48,6 +48,8 @@ const AdminReports = () => {
         response = await adminAPI.getSalesReport(filters.start_date, filters.end_date);
       } else if (activeTab === 'teamIncome') {
         response = await adminAPI.getTeamIncomeReport(pageNum, {});
+      } else if (activeTab === 'rewardIncome') {
+        response = await adminAPI.getRewardIncomeReport(pageNum, filters.plan_id ? { plan_id: filters.plan_id } : {});
       } else if (activeTab === 'withdrawals') {
         response = await adminAPI.getWithdrawalReport(pageNum, filters.status ? { status: filters.status } : {});
       } else if (activeTab === 'userEarnings') {
@@ -130,14 +132,31 @@ const AdminReports = () => {
         { key: 'amount', label: 'Amount' }
       ];
     }
+    if (activeTab === 'rewardIncome') {
+      return [
+        { key: 'created_at', label: 'Paid On' },
+        { key: 'name', label: 'User' },
+        { key: 'referral_code', label: 'User ID', text: true },
+        { key: 'mobile', label: 'Mobile', text: true },
+        { key: 'plan_label', label: 'Reward' },
+        { key: 'amount', label: 'Amount' }
+      ];
+    }
     if (activeTab === 'withdrawals') {
       return [
         { key: 'created_at', label: 'Requested' },
         { key: 'name', label: 'User' },
+        { key: 'referral_code', label: 'User ID', text: true },
         { key: 'email', label: 'Email' },
+        { key: 'mobile', label: 'Mobile', text: true },
+        { key: 'bank_name', label: 'Bank' },
+        { key: 'branch_name', label: 'Branch' },
+        { key: 'account_number', label: 'Account Number', text: true },
+        { key: 'ifsc_code', label: 'IFSC', text: true },
+        { key: 'pan_number', label: 'PAN', text: true },
+        { key: 'kyc_status', label: 'KYC Status' },
         { key: 'amount', label: 'Amount' },
         { key: 'admin_charge', label: 'Admin Charge' },
-        { key: 'repurchase_amount', label: 'Repurchase' },
         { key: 'payout_amount', label: 'Payout' },
         { key: 'status', label: 'Status' },
         { key: 'processed_at', label: 'Processed' },
@@ -151,7 +170,7 @@ const AdminReports = () => {
         { key: 'referral_code', label: 'User ID' },
         { key: 'rank_name', label: 'Rank' },
         { key: 'team_income_total', label: 'Level Income' },
-        { key: 'repurchase_balance', label: 'Repurchase Balance' },
+        { key: 'reward_income_total', label: 'Reward Income' },
         { key: 'total_earnings', label: 'Total Earnings' },
         { key: 'available_for_withdrawal', label: 'Available' },
         { key: 'total_withdrawn', label: 'Withdrawn' },
@@ -184,6 +203,7 @@ const AdminReports = () => {
         { key: 'referral_code', label: 'User ID' },
         { key: 'wallet_balance', label: 'Wallet Balance' },
         { key: 'total_earned', label: 'Total Earned' },
+        { key: 'reward_income', label: 'Reward Income' },
         { key: 'pending_income', label: 'Pending Income' },
         { key: 'liability', label: 'Liability' },
         { key: 'direct_count', label: 'Direct Referrals' },
@@ -222,7 +242,6 @@ const AdminReports = () => {
         { key: 'active', label: 'Active Package' },
         { key: 'wallet_balance', label: 'Wallet Balance' },
         { key: 'earnings_balance', label: 'Earnings Balance' },
-        { key: 'repurchase_balance', label: 'Repurchase Balance' },
         { key: 'total_deposits', label: 'Total Deposits' },
         { key: 'total_income', label: 'Total Income' },
         { key: 'total_purchases', label: 'Total Purchases' },
@@ -241,6 +260,11 @@ const AdminReports = () => {
       rows = data.orders_by_status || [];
     } else if (activeTab === 'teamIncome') {
       rows = await fetchAllRows((p) => adminAPI.getTeamIncomeReport(p, {}), 'events');
+    } else if (activeTab === 'rewardIncome') {
+      rows = await fetchAllRows(
+        (p) => adminAPI.getRewardIncomeReport(p, filters.plan_id ? { plan_id: filters.plan_id } : {}),
+        'rewards'
+      );
     } else if (activeTab === 'withdrawals') {
       rows = await fetchAllRows(
         (p) => adminAPI.getWithdrawalReport(p, filters.status ? { status: filters.status } : {}),
@@ -296,10 +320,10 @@ const AdminReports = () => {
   const TX_TYPE_LABELS = {
     deposit: 'Deposit', purchase: 'Purchase', refund: 'Refund', bonus: 'Bonus',
     incentive: 'Incentive', self_cashback: 'Self Cashback', team_income: 'Team Income',
-    withdrawal: 'Withdrawal', withdrawal_reversal: 'Withdrawal Reversal'
+    withdrawal: 'Withdrawal', withdrawal_reversal: 'Withdrawal Reversal', reward: 'Milestone Reward'
   };
   const txTypeClass = (t) =>
-    t === 'deposit' || t === 'team_income' || t === 'self_cashback' || t === 'bonus' || t === 'incentive' || t === 'refund' || t === 'withdrawal_reversal'
+    t === 'deposit' || t === 'team_income' || t === 'reward' || t === 'self_cashback' || t === 'bonus' || t === 'incentive' || t === 'refund' || t === 'withdrawal_reversal'
       ? 'badge-success'
       : t === 'withdrawal' || t === 'purchase'
         ? 'badge-danger'
@@ -404,7 +428,7 @@ const AdminReports = () => {
     ];
     const withdrawalColumns = [
       { key: 'created_at', label: 'Requested' }, { key: 'amount', label: 'Amount' },
-      { key: 'admin_charge', label: 'Admin Charge' }, { key: 'repurchase_amount', label: 'Repurchase' },
+      { key: 'admin_charge', label: 'Admin Charge' },
       { key: 'payout_amount', label: 'Payout' }, { key: 'status', label: 'Status' }, { key: 'processed_at', label: 'Processed' }
     ];
     const teamColumns = [
@@ -443,9 +467,9 @@ const AdminReports = () => {
 
         {/* Summary stats */}
         <div className="stats-grid">
-          <div className="stat-card info"><div className="stat-icon">💳</div><div className="stat-label">Wallet Balance</div><div className="stat-value">{fmt(profile.wallet_balance)}</div><div className="stat-subtext">Earnings {fmt(profile.earnings_balance)} · Repurchase {fmt(profile.repurchase_balance)}</div></div>
+          <div className="stat-card info"><div className="stat-icon">💳</div><div className="stat-label">Wallet Balance</div><div className="stat-value">{fmt(profile.wallet_balance)}</div><div className="stat-subtext">Earnings {fmt(profile.earnings_balance)}</div></div>
           <div className="stat-card success"><div className="stat-icon">💰</div><div className="stat-label">Total Deposits</div><div className="stat-value">{fmt(summary.total_deposits)}</div></div>
-          <div className="stat-card success"><div className="stat-icon">📈</div><div className="stat-label">Total Income Earned</div><div className="stat-value">{fmt(summary.total_income)}</div><div className="stat-subtext">Team {fmt(summary.team_income_total)} · Cashback {fmt(summary.cashback_total)}</div></div>
+          <div className="stat-card success"><div className="stat-icon">📈</div><div className="stat-label">Total Income Earned</div><div className="stat-value">{fmt(summary.total_income)}</div><div className="stat-subtext">Team {fmt(summary.team_income_total)} · Rewards {fmt(summary.reward_income_total)}</div></div>
           <div className="stat-card"><div className="stat-icon">🛒</div><div className="stat-label">Total Purchases</div><div className="stat-value">{fmt(summary.total_purchases)}</div><div className="stat-subtext">{summary.order_count} orders</div></div>
           <div className="stat-card warning"><div className="stat-icon">🏧</div><div className="stat-label">Withdrawn</div><div className="stat-value">{fmt(summary.total_withdrawn)}</div><div className="stat-subtext">Pending {fmt(summary.pending_withdrawal)}</div></div>
           <div className="stat-card"><div className="stat-icon">👥</div><div className="stat-label">Team Size</div><div className="stat-value">{downline.length}</div><div className="stat-subtext">{summary.direct_count} directs ({summary.active_directs} active)</div></div>
@@ -586,14 +610,13 @@ const AdminReports = () => {
           <div className="table-container">
             {withdrawals.length > 0 ? (
               <table className="table">
-                <thead><tr><th>Requested</th><th>Amount</th><th>Admin Charge</th><th>Repurchase</th><th>Payout</th><th>Status</th><th>Processed</th></tr></thead>
+                <thead><tr><th>Requested</th><th>Amount</th><th>Admin Charge</th><th>Payout</th><th>Status</th><th>Processed</th></tr></thead>
                 <tbody>
                   {withdrawals.map((w) => (
                     <tr key={w.id}>
                       <td className="text-muted datetime-cell">{formatDateTime(w.created_at)}</td>
                       <td className="text-primary font-semibold">{fmt(w.amount)}</td>
                       <td>{w.status === 'processed' ? fmt(w.admin_charge) : '—'}</td>
-                      <td>{w.status === 'processed' ? fmt(w.repurchase_amount) : '—'}</td>
                       <td className="text-success font-semibold">{w.status === 'processed' ? fmt(w.payout_amount) : '—'}</td>
                       <td><span className={`badge badge-${w.status === 'processed' ? 'success' : w.status === 'pending' ? 'warning' : w.status === 'rejected' ? 'danger' : 'neutral'}`}>{w.status}</span></td>
                       <td className="text-muted datetime-cell">{formatDateTime(w.processed_at)}</td>
@@ -682,16 +705,6 @@ const AdminReports = () => {
               <div className="stat-label">Total Income Paid</div>
               <div className="stat-value">{fmt(data.totals?.total_amount)}</div>
             </div>
-            <div className="stat-card info">
-              <div className="stat-icon">🛒</div>
-              <div className="stat-label">From Purchases</div>
-              <div className="stat-value">{fmt(data.totals?.purchase_total)}</div>
-            </div>
-            <div className="stat-card info">
-              <div className="stat-icon">🔄</div>
-              <div className="stat-label">From Repurchases</div>
-              <div className="stat-value">{fmt(data.totals?.repurchase_total)}</div>
-            </div>
             <div className="stat-card">
               <div className="stat-icon">🔁</div>
               <div className="stat-label">Total Events</div>
@@ -728,6 +741,68 @@ const AdminReports = () => {
       );
     }
 
+    if (activeTab === 'rewardIncome') {
+      const byPlan = data.by_plan || [];
+      return (
+        <div>
+          <div className="stats-grid">
+            <div className="stat-card success">
+              <div className="stat-icon">🏆</div>
+              <div className="stat-label">Total Reward Income Paid</div>
+              <div className="stat-value">{fmt(byPlan.reduce((s, b) => s + (b.amount || 0), 0))}</div>
+              <div className="stat-subtext">{byPlan.reduce((s, b) => s + (b.count || 0), 0)} rewards paid</div>
+            </div>
+            {byPlan.map((b) => (
+              <div className="stat-card info" key={b.plan_id}>
+                <div className="stat-icon">{/car/i.test(b.plan_name) ? '🚗' : /bike/i.test(b.plan_name) ? '🏍️' : '🎁'}</div>
+                <div className="stat-label">{b.plan_name}{b.matrix_label ? ` (${b.matrix_label})` : ''}</div>
+                <div className="stat-value">{fmt(b.amount)}</div>
+                <div className="stat-subtext">{b.count} paid</div>
+              </div>
+            ))}
+            <div className="stat-card warning">
+              <div className="stat-icon">⏳</div>
+              <div className="stat-label">Awaiting Activation</div>
+              <div className="stat-value">{data.totals?.awaiting_count || 0}</div>
+              <div className="stat-subtext">{fmt(data.totals?.awaiting_amount)} held until package is active</div>
+            </div>
+          </div>
+          <div className="card">
+            <div className="card-header"><h3 className="card-title">Reward Payouts ({data.total || 0})</h3></div>
+            <div className="filter-form">
+              <div className="form-group">
+                <label className="form-label">Reward</label>
+                <select className="form-input" value={filters.plan_id || ''} onChange={(e) => setFilters({ ...filters, plan_id: e.target.value })} style={{ width: '200px' }}>
+                  <option value="">All Rewards</option>
+                  {byPlan.map((b) => <option key={b.plan_id} value={b.plan_id}>{b.plan_name}</option>)}
+                </select>
+              </div>
+              <button type="button" className="btn btn-primary" onClick={() => { setPage(1); fetchReports(1); }}>Apply</button>
+            </div>
+            <div className="table-container">
+              {data.rewards?.length > 0 ? (
+                <table className="table">
+                  <thead><tr><th>Paid On</th><th>User</th><th>User ID</th><th>Reward</th><th>Amount</th></tr></thead>
+                  <tbody>
+                    {data.rewards.map((r) => (
+                      <tr key={r.id}>
+                        <td className="text-muted datetime-cell">{formatDateTime(r.created_at)}</td>
+                        <td><div className="user-cell"><span className="user-name">{r.name}</span><span className="user-email">{r.mobile}</span></div></td>
+                        <td className="font-mono">{r.referral_code}</td>
+                        <td><span className="badge badge-info">{r.plan_label}</span></td>
+                        <td className="text-success font-semibold">{fmt(r.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : <p className="text-muted">No reward income paid yet</p>}
+            </div>
+            <Pagination page={page} totalPages={totalPages()} total={data.total || 0} onChange={(p) => { setPage(p); fetchReports(p); }} />
+          </div>
+        </div>
+      );
+    }
+
     if (activeTab === 'withdrawals') {
       const byStatus = data.by_status || [];
       const lookup = (s) => byStatus.find((r) => r.status === s) || { count: 0, amount: 0 };
@@ -757,14 +832,25 @@ const AdminReports = () => {
             <div className="table-container">
               {data.withdrawals?.length > 0 ? (
                 <table className="table">
-                  <thead><tr><th>User</th><th>Amount</th><th>Admin Charge</th><th>Repurchase</th><th>Payout</th><th>Status</th><th>Requested</th><th>Processed</th><th>Reason</th></tr></thead>
+                  <thead><tr><th>User</th><th>Bank Details</th><th>Amount</th><th>Admin Charge</th><th>Payout</th><th>Status</th><th>Requested</th><th>Processed</th><th>Reason</th></tr></thead>
                   <tbody>
                     {data.withdrawals.map((w) => (
                       <tr key={w.id}>
-                        <td><div className="user-cell"><span className="user-name">{w.name}</span><span className="user-email">{w.email}</span></div></td>
+                        <td><div className="user-cell"><span className="user-name">{w.name}</span><span className="user-email">{w.email}</span>{w.referral_code && <span className="user-email">ID: {w.referral_code}</span>}</div></td>
+                        <td>
+                          {w.bank_name || w.account_number ? (
+                            <div className="user-cell" style={{ minWidth: 180 }}>
+                              <span className="user-name">{w.bank_name}{w.branch_name ? ` · ${w.branch_name}` : ''}</span>
+                              <span className="user-email" style={{ whiteSpace: 'nowrap' }}>A/C: <strong>{w.account_number}</strong></span>
+                              <span className="user-email" style={{ whiteSpace: 'nowrap' }}>IFSC: <strong>{w.ifsc_code}</strong></span>
+                              {w.kyc_status && (
+                                <span className={`badge badge-${w.kyc_status === 'approved' ? 'success' : w.kyc_status === 'pending' ? 'warning' : 'danger'}`} style={{ alignSelf: 'flex-start', marginTop: 2, fontSize: '0.65rem' }}>KYC {w.kyc_status}</span>
+                              )}
+                            </div>
+                          ) : <span className="badge badge-danger">No bank KYC</span>}
+                        </td>
                         <td className="text-primary font-semibold">{fmt(w.amount)}</td>
                         <td>{w.status === 'processed' ? fmt(w.admin_charge) : '—'}</td>
-                        <td>{w.status === 'processed' ? fmt(w.repurchase_amount) : '—'}</td>
                         <td className="text-success font-semibold">{w.status === 'processed' ? fmt(w.payout_amount) : '—'}</td>
                         <td><span className={`badge badge-${w.status === 'processed' ? 'success' : w.status === 'pending' ? 'warning' : w.status === 'rejected' ? 'danger' : 'neutral'}`}>{w.status}</span></td>
                         <td className="text-muted datetime-cell">{formatDateTime(w.created_at)}</td>
@@ -790,7 +876,7 @@ const AdminReports = () => {
             <div className="table-container">
               {data.users?.length > 0 ? (
                 <table className="table">
-                  <thead><tr><th>User</th><th>User ID</th><th>Rank</th><th>Level Income</th><th>Repurchase Balance</th><th>Total Earnings</th><th>Available</th><th>Withdrawn</th><th>Pending</th><th>Status</th></tr></thead>
+                  <thead><tr><th>User</th><th>User ID</th><th>Rank</th><th>Level Income</th><th>Reward Income</th><th>Total Earnings</th><th>Available</th><th>Withdrawn</th><th>Pending</th><th>Status</th></tr></thead>
                   <tbody>
                     {data.users.map((u) => (
                       <tr key={u.id}>
@@ -798,7 +884,7 @@ const AdminReports = () => {
                         <td className="font-mono">{u.referral_code}</td>
                         <td>{u.rank_name ? <span className={rankBadgeClass(u.rank_name)}>{u.rank_name}</span> : <span className="text-muted">—</span>}</td>
                         <td>{fmt(u.team_income_total)}</td>
-                        <td className="text-warning">{fmt(u.repurchase_balance)}</td>
+                        <td>{u.reward_income_total > 0 ? <span className="font-semibold">🏆 {fmt(u.reward_income_total)}</span> : fmt(0)}</td>
                         <td className="text-success font-semibold">{fmt(u.total_earnings)}</td>
                         <td className="text-primary">{fmt(u.available_for_withdrawal)}</td>
                         <td className="text-muted">{fmt(u.total_withdrawn)}</td>
@@ -923,7 +1009,7 @@ const AdminReports = () => {
         <div>
           <div className="stats-grid">
             <div className="stat-card info"><div className="stat-icon">💳</div><div className="stat-label">Total Wallet Balance</div><div className="stat-value">{fmt(data.grand_totals?.total_wallet_balance)}</div></div>
-            <div className="stat-card success"><div className="stat-icon">✅</div><div className="stat-label">Total Earned</div><div className="stat-value">{fmt(data.grand_totals?.total_earned)}</div></div>
+            <div className="stat-card success"><div className="stat-icon">✅</div><div className="stat-label">Total Earned</div><div className="stat-value">{fmt(data.grand_totals?.total_earned)}</div><div className="stat-subtext">incl. {fmt(data.grand_totals?.total_reward_income)} rewards</div></div>
             <div className="stat-card warning"><div className="stat-icon">⏳</div><div className="stat-label">Total Pending</div><div className="stat-value">{fmt(data.grand_totals?.total_pending)}</div></div>
             <div className="stat-card danger"><div className="stat-icon">📊</div><div className="stat-label">Total Liability</div><div className="stat-value">{fmt(data.grand_totals?.total_liability)}</div></div>
           </div>
@@ -942,7 +1028,7 @@ const AdminReports = () => {
             <div className="table-container">
               {data.users?.length > 0 ? (
                 <table className="table">
-                  <thead><tr><th>User</th><th>User ID</th><th>Wallet Balance</th><th>Total Earned</th><th>Pending Income</th><th>Liability</th><th>Directs</th><th>Status</th></tr></thead>
+                  <thead><tr><th>User</th><th>User ID</th><th>Wallet Balance</th><th>Total Earned</th><th>Reward Income</th><th>Pending Income</th><th>Liability</th><th>Directs</th><th>Status</th></tr></thead>
                   <tbody>
                     {data.users.map((user) => (
                       <tr key={user.id}>
@@ -950,6 +1036,7 @@ const AdminReports = () => {
                         <td className="font-mono">{user.referral_code}</td>
                         <td className="font-semibold">{fmt(user.wallet_balance)}</td>
                         <td className="text-success">{fmt(user.total_earned)}</td>
+                        <td>{fmt(user.reward_income)}</td>
                         <td className="text-warning">{fmt(user.pending_income)}</td>
                         <td className="text-danger">{fmt(user.liability)}</td>
                         <td><span className="badge badge-info">{user.direct_count}</span><small className="text-muted"> ({user.active_directs} active)</small></td>

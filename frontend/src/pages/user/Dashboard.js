@@ -3,11 +3,11 @@ import { Link } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { toast } from 'react-toastify';
 import { userAPI, orderAPI } from '../../utils/api';
-import { RANK_COLORS } from '../../utils/rankTheme';
 import DashboardLayout from '../../components/DashboardLayout';
 import SmartActionCard, { getSmartCards } from '../../components/SmartActionCard';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
 import PurchaseModal from '../../components/PurchaseModal';
+import OfferBanners from '../../components/OfferBanners';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
@@ -233,7 +233,8 @@ const Dashboard = () => {
   };
 
   const selectProductDesign = (productId, designIdx) => {
-    setSelectedDesigns(prev => ({ ...prev, [productId]: designIdx }));
+    // Clicking the active design again deselects it (back to main images).
+    setSelectedDesigns(prev => ({ ...prev, [productId]: prev[productId] === designIdx ? null : designIdx }));
   };
 
   const openPurchaseDialog = (product) => {
@@ -285,6 +286,9 @@ const Dashboard = () => {
   return (
     <DashboardLayout>
       <div className="dashboard-page">
+        {/* Admin offer banners (only those inside their scheduled window) */}
+        <OfferBanners />
+
         {/* Smart Action Cards */}
         {smartCards.map((card) => (
           <SmartActionCard key={card.type} type={card.type} />
@@ -312,16 +316,6 @@ const Dashboard = () => {
                 <span className={`badge ${user.has_active_package ? 'badge-success' : 'badge-warning'}`}>
                   {user.has_active_package ? '✓ Active Member' : '○ Inactive'}
                 </span>
-                {!!user.has_active_package && user.rank_name && (
-                  <span
-                    className="badge rank-badge-hero"
-                    style={RANK_COLORS[user.rank_name] ? {
-                      background: `linear-gradient(135deg, ${RANK_COLORS[user.rank_name].main}, ${RANK_COLORS[user.rank_name].light})`,
-                      color: RANK_COLORS[user.rank_name].dark,
-                      borderColor: RANK_COLORS[user.rank_name].light
-                    } : undefined}
-                  >★ {user.rank_name} Rank</span>
-                )}
                 <span className={`badge badge-${user.pan_status === 'approved' ? 'success' : user.pan_status === 'pending' ? 'warning' : 'danger'}`}>
                   PAN: {user.pan_status?.toUpperCase() || 'PENDING'}
                 </span>
@@ -337,12 +331,12 @@ const Dashboard = () => {
           </div>
           <div className="profile-stats-bar">
             <div className="stat-item">
-              <span className="stat-value">{referrals.total || 0}</span>
+              <span className="stat-value">{referrals.team_total || 0}</span>
               <span className="stat-label">Team Members</span>
             </div>
             <div className="stat-divider"></div>
             <div className="stat-item">
-              <span className="stat-value">{referrals.active || 0}</span>
+              <span className="stat-value">{referrals.team_active || 0}</span>
               <span className="stat-label">Active</span>
             </div>
             <div className="stat-divider"></div>
@@ -360,21 +354,21 @@ const Dashboard = () => {
 
         {/* Quick Stats Grid */}
         <div className="stats-grid-enhanced">
-          <Link to="/wallet" className="stat-card-enhanced success animate-in">
-            <div className="stat-card-icon">🔄</div>
+          <Link to="/withdrawal" className="stat-card-enhanced success animate-in">
+            <div className="stat-card-icon">💰</div>
             <div className="stat-card-content">
-              <span className="stat-card-value">₹{parseFloat(wallet.repurchase_balance || 0).toLocaleString()}</span>
-              <span className="stat-card-label">Repurchase Wallet</span>
-              <div className="stat-card-sub">Funds your next rank</div>
+              <span className="stat-card-value">₹{parseFloat(earnings.availableForWithdrawal || 0).toLocaleString()}</span>
+              <span className="stat-card-label">Available Earnings</span>
+              <div className="stat-card-sub">Ready to withdraw</div>
             </div>
             <div className="stat-card-arrow">→</div>
           </Link>
           <Link to="/referrals" className="stat-card-enhanced info animate-in" style={{ animationDelay: '0.1s' }}>
             <div className="stat-card-icon">👥</div>
             <div className="stat-card-content">
-              <span className="stat-card-value">{referrals.total || 0}</span>
+              <span className="stat-card-value">{referrals.team_total || 0}</span>
               <span className="stat-card-label">My Team</span>
-              <div className="stat-card-sub">{referrals.active || 0} active</div>
+              <div className="stat-card-sub">{referrals.team_active || 0} active · 10 levels</div>
             </div>
           </Link>
           <Link to="/withdrawal" className="stat-card-enhanced warning animate-in" style={{ animationDelay: '0.2s' }}>
@@ -393,37 +387,30 @@ const Dashboard = () => {
               <div className="stat-card-sub">Lifetime income</div>
             </div>
           </div>
+          <Link to="/rewards" className="stat-card-enhanced reward animate-in" style={{ animationDelay: '0.4s' }}>
+            <div className="stat-card-icon">🏆</div>
+            <div className="stat-card-content">
+              <span className="stat-card-value">₹{parseFloat(earnings.rewardIncomeTotal || 0).toLocaleString()}</span>
+              <span className="stat-card-label">Reward Income</span>
+              <div className="stat-card-sub">Bike &amp; Car Fund</div>
+            </div>
+            <div className="stat-card-arrow">→</div>
+          </Link>
         </div>
 
-        {/* Rank Upgrade Progress — !! coerces has_active_package (0/1 from the
-            API) to boolean so React doesn't render a stray "0" when inactive */}
-        {!!user.has_active_package && dashboard?.upgrade && !dashboard.upgrade.at_top_rank && (
-          <Link to="/wallet" className="upgrade-card animate-in">
-            <div className="upgrade-card-icon">🚀</div>
+        {/* QR payment awaiting admin approval — !! coerces has_active_package
+            (0/1 from the API) so React doesn't render a stray "0" */}
+        {!user.has_active_package && dashboard?.pendingQrPayment && (
+          <Link to="/orders" className="upgrade-card animate-in">
+            <div className="upgrade-card-icon">⏳</div>
             <div className="upgrade-card-content">
-              <span className="upgrade-card-title">
-                Next Rank: {dashboard.upgrade.next_rank_name} — ₹{parseFloat(dashboard.upgrade.next_price).toLocaleString()}
-              </span>
-              <div className="upgrade-card-bar">
-                <div className="upgrade-card-fill" style={{ width: `${Math.min(100, Math.round(dashboard.upgrade.progress || 0))}%` }}></div>
-              </div>
+              <span className="upgrade-card-title">Activation pending approval</span>
               <span className="upgrade-card-sub">
-                {dashboard.upgrade.shortfall > 0
-                  ? `Repurchase Wallet: ₹${Math.max(0, parseFloat(dashboard.upgrade.next_price) - dashboard.upgrade.shortfall).toLocaleString()} saved · ₹${parseFloat(dashboard.upgrade.shortfall).toLocaleString()} to go — 20% of every withdrawal funds this automatically`
-                  : 'Repurchase Wallet ready — upgrade happens automatically'}
+                Your QR payment of ₹{parseFloat(dashboard.pendingQrPayment.amount).toLocaleString()} for {dashboard.pendingQrPayment.product_name} (UTR {dashboard.pendingQrPayment.utr}) is being verified by the admin.
               </span>
             </div>
             <span className="upgrade-card-arrow">→</span>
           </Link>
-        )}
-        {!!user.has_active_package && dashboard?.upgrade?.at_top_rank && (
-          <div className="upgrade-card top-rank animate-in">
-            <div className="upgrade-card-icon">🏆</div>
-            <div className="upgrade-card-content">
-              <span className="upgrade-card-title">Top rank reached: {user.rank_name}</span>
-              <span className="upgrade-card-sub">Repurchase balance keeps accumulating — higher packages will be added in future and bought automatically.</span>
-            </div>
-          </div>
         )}
 
         {/* Navigation Tabs */}
@@ -505,7 +492,7 @@ const Dashboard = () => {
                           <h4>{product.name}</h4>
                           <div className="featured-incentive">
                             <span className="incentive-badge">
-                              {product.rank_name ? `★ ${product.rank_name} Rank` : `★ Rank Package`}
+                              {product.is_purchasable ? `★ ${product.rank_name || 'Main'} Package` : 'Repurchase · Coming Soon'}
                             </span>
                           </div>
                           <div className="featured-footer">
@@ -529,8 +516,13 @@ const Dashboard = () => {
                 <div className="income-mini-card">
                   <span className="income-mini-label">Level Income</span>
                   <span className="income-mini-value">₹{parseFloat(earnings.teamIncomeTotal || 0).toLocaleString()}</span>
-                  <span className="income-mini-sub">Purchases + repurchases</span>
+                  <span className="income-mini-sub">From your team's purchases</span>
                 </div>
+                <Link to="/rewards" className="income-mini-card" style={{ textDecoration: 'none', color: 'inherit' }}>
+                  <span className="income-mini-label">Reward Income</span>
+                  <span className="income-mini-value">₹{parseFloat(earnings.rewardIncomeTotal || 0).toLocaleString()}</span>
+                  <span className="income-mini-sub">Bike &amp; Car Fund milestones</span>
+                </Link>
                 <div className="income-mini-card">
                   <span className="income-mini-label">Pending Withdrawals</span>
                   <span className="income-mini-value">₹{parseFloat(earnings.pendingWithdrawal || 0).toLocaleString()}</span>
@@ -576,7 +568,7 @@ const Dashboard = () => {
           <div className="tab-content animate-fade-in">
             <div className="shop-hero">
               <h2>🛍️ Premium Products</h2>
-              <p>Purchase a rank package to activate your account and earn level income</p>
+              <p>Purchase the Star package to activate your account and earn level income</p>
             </div>
             <div className="products-grid-dashboard">
               {products.length > 0 ? products.map((product, index) => {
@@ -588,8 +580,11 @@ const Dashboard = () => {
                 // Designs (optional variants): the selected design's images
                 // take over the card's image slider until it has images.
                 const productDesigns = Array.isArray(product.designs) ? product.designs : [];
-                const designIdx = selectedDesigns[product.id] ?? 0;
-                const selectedDesign = productDesigns[designIdx] || null;
+                // No design is picked until the buyer clicks one, so the card opens on
+                // the main product images.
+                const designIdx = selectedDesigns[product.id] ?? null;
+                const selectedDesign = designIdx !== null ? (productDesigns[designIdx] || null) : null;
+                const allDesignsOutOfStock = productDesigns.length > 0 && productDesigns.every(d => d.out_of_stock);
                 const displayImages = selectedDesign && selectedDesign.images && selectedDesign.images.length > 0
                   ? selectedDesign.images
                   : productImages;
@@ -625,12 +620,21 @@ const Dashboard = () => {
                           <button
                             key={`${d.name}-${i}`}
                             type="button"
-                            className={`card-design-tab${i === designIdx ? ' active' : ''}`}
+                            className={`card-design-tab${i === designIdx ? ' active' : ''}${d.out_of_stock ? ' out-of-stock' : ''}`}
                             onClick={() => selectProductDesign(product.id, i)}
+                            title={d.out_of_stock ? 'This design is out of stock' : undefined}
                           >
                             {d.name}
+                            {d.out_of_stock && <span className="card-design-oos">Out of stock</span>}
                           </button>
                         ))}
+                      </div>
+                    )}
+                    {allDesignsOutOfStock ? (
+                      <div className="card-design-stock-msg">All designs are currently out of stock</div>
+                    ) : selectedDesign && selectedDesign.out_of_stock && (
+                      <div className="card-design-stock-msg">
+                        {selectedDesign.name} is out of stock — please select another design
                       </div>
                     )}
                     {selectedDesign && selectedDesign.description && (
@@ -669,19 +673,31 @@ const Dashboard = () => {
                           <span className="benefit-icon">💰</span>
                           <span className="benefit-title">Product Benefits</span>
                         </div>
-                        <div className="benefit-details">
-                          <div className="benefit-row">
-                            <span className="benefit-label">Rank</span>
-                            <span className="benefit-value">{product.rank_name || 'Rank Package'}</span>
-                          </div>
-                          <div className="benefit-row highlight">
-                            <span className="benefit-label">Level Income</span>
-                            <span className="benefit-value total">
-                              {product.rank_name ? `${product.rank_name} · 10 levels` : '10 levels per rank'}
-                            </span>
-                          </div>
-                        </div>
-                        <p className="benefit-note">Income from your team's purchases & auto rank upgrades</p>
+                        {product.is_purchasable ? (
+                          <>
+                            <div className="benefit-details">
+                              <div className="benefit-row">
+                                <span className="benefit-label">Package</span>
+                                <span className="benefit-value">{product.rank_name || product.name}</span>
+                              </div>
+                              <div className="benefit-row highlight">
+                                <span className="benefit-label">Level Income</span>
+                                <span className="benefit-value total">10 levels</span>
+                              </div>
+                            </div>
+                            <p className="benefit-note">Activates your account · income from your team's purchases</p>
+                          </>
+                        ) : (
+                          <>
+                            <div className="benefit-details">
+                              <div className="benefit-row highlight">
+                                <span className="benefit-label">Repurchase Product</span>
+                                <span className="benefit-value total">Coming Soon</span>
+                              </div>
+                            </div>
+                            <p className="benefit-note">Buy as product for repurchase — repurchase coming soon</p>
+                          </>
+                        )}
                       </div>
 
                       {product.youtube_link && (
@@ -702,9 +718,9 @@ const Dashboard = () => {
                         <button
                           className="btn btn-primary btn-sm"
                           onClick={() => openPurchaseDialog(product)}
-                          disabled={!product.is_active}
+                          disabled={!product.is_active || allDesignsOutOfStock}
                         >
-                          {product.is_active ? 'Buy Now' : 'Unavailable'}
+                          {!product.is_active ? 'Unavailable' : allDesignsOutOfStock ? 'Out of Stock' : 'Buy Now'}
                         </button>
                       </div>
                     </div>
@@ -730,7 +746,7 @@ const Dashboard = () => {
                 <div className="referral-icon">🔗</div>
                 <div className="referral-text">
                   <h3>Share & Earn</h3>
-                  <p>Earn Team Income when your downline purchases — 10 levels per rank (Star, Silver, Gold, Platinum)</p>
+                  <p>Earn Team Income when your downline purchases — up to 10 levels</p>
                 </div>
               </div>
               <div className="referral-link-box">
@@ -749,15 +765,15 @@ const Dashboard = () => {
             {/* Team Stats */}
             <div className="team-stats-row">
               <div className="team-stat-card">
-                <span className="team-stat-value">{referrals.total || 0}</span>
+                <span className="team-stat-value">{referrals.team_total || 0}</span>
                 <span className="team-stat-label">Total Members</span>
               </div>
               <div className="team-stat-card success">
-                <span className="team-stat-value">{referrals.active || 0}</span>
+                <span className="team-stat-value">{referrals.team_active || 0}</span>
                 <span className="team-stat-label">Active</span>
               </div>
               <div className="team-stat-card warning">
-                <span className="team-stat-value">{(referrals.total || 0) - (referrals.active || 0)}</span>
+                <span className="team-stat-value">{(referrals.team_total || 0) - (referrals.team_active || 0)}</span>
                 <span className="team-stat-label">Inactive</span>
               </div>
             </div>
@@ -786,7 +802,7 @@ const Dashboard = () => {
                 </div>
               ) : null}
               {teamTree.length > 0 && (referrals.total || 0) > teamTree.length && (
-                <Link to="/referrals" className="team-view-all">View all {referrals.total} referrals →</Link>
+                <Link to="/referrals" className="team-view-all">View all {referrals.total} direct referrals →</Link>
               )}
               {teamTree.length === 0 && (
                 <div className="empty-state-large">
@@ -966,14 +982,6 @@ const Dashboard = () => {
           border: 1px solid rgba(239, 68, 68, 0.3);
         }
 
-        .profile-hero .rank-badge-hero {
-          background: linear-gradient(135deg, var(--gold-500, #CFAA57), var(--gold-300, #ECCA7B));
-          color: #2B1F07;
-          border: 1px solid rgba(236, 202, 123, 0.7);
-          box-shadow: 0 0 16px rgba(207, 170, 87, 0.5);
-          font-weight: 700;
-        }
-
         /* Rank Upgrade Progress Card */
         .upgrade-card {
           display: flex;
@@ -1124,9 +1132,24 @@ const Dashboard = () => {
         /* Stats Grid Enhanced */
         .stats-grid-enhanced {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(5, 1fr);
           gap: 1rem;
           margin-bottom: 1.5rem;
+        }
+
+        /* 5 cards in one row: tighten them on mid-size desktops */
+        @media (min-width: 1025px) and (max-width: 1366px) {
+          .stats-grid-enhanced { gap: 0.75rem; }
+          .stats-grid-enhanced .stat-card-enhanced { padding: 1rem 0.875rem; gap: 0.625rem; }
+          .stats-grid-enhanced .stat-card-icon { width: 40px; height: 40px; font-size: 1.25rem; }
+          .stats-grid-enhanced .stat-card-value { font-size: 1.125rem; }
+        }
+
+        /* Odd card out on 2-column layouts spans the full row */
+        @media (max-width: 1024px) {
+          .stats-grid-enhanced > .stat-card-enhanced:last-child:nth-child(odd) {
+            grid-column: 1 / -1;
+          }
         }
 
         .stat-card-enhanced {
@@ -1170,12 +1193,18 @@ const Dashboard = () => {
           border: none;
           box-shadow: 0 4px 20px rgba(7, 60, 57, 0.3);
         }
+        .stat-card-enhanced.reward {
+          background: linear-gradient(135deg, #B18B36 0%, #073C39 100%);
+          border: none;
+          box-shadow: 0 4px 20px rgba(177, 139, 54, 0.35);
+        }
 
         /* Soft decorative circle, like the wallet cards */
         .stat-card-enhanced.success::after,
         .stat-card-enhanced.info::after,
         .stat-card-enhanced.warning::after,
-        .stat-card-enhanced.accent::after {
+        .stat-card-enhanced.accent::after,
+        .stat-card-enhanced.reward::after {
           content: '';
           position: absolute;
           right: -18px;
@@ -1203,7 +1232,8 @@ const Dashboard = () => {
         .stat-card-enhanced.success .stat-card-icon,
         .stat-card-enhanced.info .stat-card-icon,
         .stat-card-enhanced.warning .stat-card-icon,
-        .stat-card-enhanced.accent .stat-card-icon {
+        .stat-card-enhanced.accent .stat-card-icon,
+        .stat-card-enhanced.reward .stat-card-icon {
           background: rgba(255, 255, 255, 0.18);
         }
 
@@ -1882,10 +1912,36 @@ const Dashboard = () => {
           color: white;
         }
 
+        .card-design-tab.out-of-stock {
+          opacity: 0.65;
+          text-decoration: line-through;
+        }
+
+        .card-design-oos {
+          display: inline-block;
+          margin-left: 0.3rem;
+          font-size: 0.6rem;
+          font-weight: 700;
+          color: #b91c1c;
+          text-decoration: none;
+        }
+
+        .card-design-tab.active .card-design-oos {
+          color: #fecaca;
+        }
+
+        .card-design-stock-msg {
+          padding: 0.35rem 1.25rem 0;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: #b91c1c;
+        }
+
         .card-design-desc {
           padding: 0.35rem 1.25rem 0;
           font-size: 0.75rem;
           color: var(--gray-500, #6b7280);
+          white-space: pre-line;
         }
 
         .card-design-video {
@@ -2531,6 +2587,7 @@ const Dashboard = () => {
         isOpen={showPurchaseModal}
         onClose={closePurchaseModal}
         product={selectedProduct}
+        initialDesignIdx={selectedProduct ? (selectedDesigns[selectedProduct.id] ?? null) : null}
         onSuccess={handlePurchaseSuccess}
       />
 

@@ -1,7 +1,53 @@
 const pool = require('../config/db');
 const { allocateInvoiceNumber } = require('../utils/helpers');
+const Product = require('./Product');
+const { PAID_ORDER_STATUSES } = require('./orderStatus');
+
+// When an order was placed for a specific design, show that design's image
+// instead of the product's main image. Drops the raw designs JSON.
+// design_image is snapshotted when the order is placed, so later admin edits
+// to the design never change past orders; the live lookup is only a fallback
+// for rows that predate the snapshot column.
+const applyDesignImage = (rows) => rows.map(({ product_designs, ...row }) => {
+  if (row.design_image) {
+    row.product_image = row.design_image;
+  } else if (row.design_name && product_designs) {
+    const { designs } = Product.parseDesigns({ designs: product_designs });
+    const design = designs.find(d => d.name === row.design_name);
+    if (design && design.images.length > 0) row.product_image = design.images[0];
+  }
+  return row;
+});
 
 const Order = {
+  // Startup schema step: add orders.design_image and snapshot the current
+  // design image onto existing design orders (best available for old rows).
+  // Idempotent — does nothing once the column exists.
+  async ensureDesignSnapshot() {
+    const [cols] = await pool.query(
+      `SELECT COUNT(*) AS n FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'orders' AND COLUMN_NAME = 'design_image'`
+    );
+    if (cols[0].n > 0) return;
+
+    await pool.query('ALTER TABLE orders ADD COLUMN design_image VARCHAR(500) NULL AFTER design_name');
+
+    const [rows] = await pool.query(
+      `SELECT o.id, o.design_name, p.designs
+         FROM orders o JOIN products p ON o.product_id = p.id
+        WHERE o.design_name IS NOT NULL AND p.designs IS NOT NULL`
+    );
+    let filled = 0;
+    for (const row of rows) {
+      const image = Product.designSnapshotImage(Product.parseDesigns(row), row.design_name);
+      if (image) {
+        await pool.execute('UPDATE orders SET design_image = ? WHERE id = ?', [image, row.id]);
+        filled++;
+      }
+    }
+    console.log(`✅ Added orders.design_image (backfilled ${filled} existing design orders)`);
+  },
+
   // Create order. Call only with an ALREADY-CONFIRMED payment (status should
   // not be 'processing'/'failed') — the invoice number is allocated here.
   async create(orderData, connection = pool) {
@@ -44,7 +90,7 @@ const Order = {
   async getByUserId(userId, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     const [rows] = await pool.execute(
-      `SELECT o.*, p.name as product_name, p.image as product_image, p.price as product_price, p.description as product_description
+      `SELECT o.*, p.name as product_name, p.image as product_image, p.designs as product_designs, p.price as product_price, p.description as product_description
        FROM orders o
        LEFT JOIN products p ON o.product_id = p.id
        WHERE o.user_id = ?
@@ -53,7 +99,7 @@ const Order = {
        LIMIT ? OFFSET ?`,
       [userId, limit, offset]
     );
-    return rows;
+    return applyDesignImage(rows);
   },
 
   // Count orders by user ID (matches getByUserId status filter, for pagination)
@@ -67,13 +113,13 @@ const Order = {
   },
 
   // Get a user's purchases (product name + price + date) — used to show a
-  // sponsor what their referral bought. Returns all non-cancelled orders.
+  // sponsor what their referral bought. Paid orders only.
   async getPurchasesByUserId(userId) {
     const [rows] = await pool.execute(
       `SELECT p.name as product_name, o.amount as price, o.created_at as purchase_date, o.status
        FROM orders o
        LEFT JOIN products p ON o.product_id = p.id
-       WHERE o.user_id = ? AND o.status != 'cancelled'
+       WHERE o.user_id = ? AND o.status IN (${PAID_ORDER_STATUSES})
        ORDER BY o.created_at DESC`,
       [userId]
     );
@@ -84,7 +130,8 @@ const Order = {
   async getAll(page = 1, limit = 20, filters = {}) {
     const offset = (page - 1) * limit;
     let query = `
-      SELECT o.*, p.name as product_name, p.image as product_image, u.name as user_name, u.email as user_email
+      SELECT o.*, p.name as product_name, p.image as product_image, p.designs as product_designs, u.name as user_name, u.email as user_email,
+             u.mobile as user_mobile, u.address as user_address, u.state as user_state, u.pincode as user_pincode
       FROM orders o
       LEFT JOIN products p ON o.product_id = p.id
       LEFT JOIN users u ON o.user_id = u.id
@@ -122,7 +169,7 @@ const Order = {
     params.push(limit, offset);
 
     const [rows] = await pool.execute(query, params);
-    return rows;
+    return applyDesignImage(rows);
   },
 
   // Count orders
@@ -224,7 +271,7 @@ const Order = {
   // failed / processing orders never generated revenue and must be excluded.
   // 'pending' = paid but awaiting shipment, so it still counts as revenue)
   async getTotalSales(startDate = null, endDate = null) {
-    let query = "SELECT SUM(amount) as total FROM orders WHERE status IN ('pending', 'delivered', 'shipped')";
+    let query = `SELECT SUM(amount) as total FROM orders WHERE status IN (${PAID_ORDER_STATUSES})`;
     const params = [];
 
     if (startDate && endDate) {

@@ -153,6 +153,7 @@ const AdminProducts = () => {
     rank_order: 0,
     level_income: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], // L1..L10 team income per this rank
     designs: [], // [{name, description, images: []}] — optional purchase variants
+    is_purchasable: false, // false = display-only "repurchase coming soon"
     is_active: true
   });
 
@@ -259,7 +260,7 @@ const AdminProducts = () => {
   };
 
   // ---- Designs (optional purchase variants) ----
-  const emptyDesign = () => ({ name: '', description: '', video_link: '', images: [] });
+  const emptyDesign = () => ({ name: '', description: '', video_link: '', images: [], out_of_stock: false });
 
   const addDesign = () => {
     setFormData(prev => ({
@@ -351,7 +352,8 @@ const AdminProducts = () => {
           name: d.name.trim(),
           description: d.description || '',
           video_link: d.video_link || '',
-          images: d.images || []
+          images: d.images || [],
+          out_of_stock: !!d.out_of_stock
         }))
     };
     try {
@@ -407,9 +409,11 @@ const AdminProducts = () => {
             name: d.name || '',
             description: d.description || '',
             video_link: d.video_link || '',
-            images: Array.isArray(d.images) ? d.images : []
+            images: Array.isArray(d.images) ? d.images : [],
+            out_of_stock: !!d.out_of_stock
           }))
         : [],
+      is_purchasable: !!product.is_purchasable,
       is_active: product.is_active
     });
     setShowModal(true);
@@ -511,14 +515,11 @@ const AdminProducts = () => {
     },
     {
       key: 'rank_name',
-      label: 'Rank',
-      render: (value, row) => value ? (
-        <span className="rank-cell">
-          ★ {value}
-          <span className="rank-order-mini">#{row.rank_order || '-'}</span>
-        </span>
+      label: 'Type',
+      render: (value, row) => row.is_purchasable ? (
+        <span className="rank-cell">★ {value || 'Main'} Package</span>
       ) : (
-        <span className="no-video">—</span>
+        <span className="no-video">Repurchase · Coming soon</span>
       )
     },
     {
@@ -658,7 +659,9 @@ const AdminProducts = () => {
                   <div className="product-content">
                     <h3 className="product-name">
                       {product.name}
-                      {product.rank_name && <span className="rank-chip">★ {product.rank_name}</span>}
+                      {product.is_purchasable
+                        ? <span className="rank-chip">★ {product.rank_name || 'Main'} Package</span>
+                        : <span className="rank-chip">Repurchase · Coming soon</span>}
                     </h3>
                     <p className="product-description">{product.description || 'No description'}</p>
 
@@ -820,13 +823,13 @@ const AdminProducts = () => {
                 className="form-input"
                 value={formData.rank_name}
                 onChange={(e) => setFormData({ ...formData, rank_name: e.target.value })}
-                placeholder="e.g. Star, Silver, Gold, Platinum"
+                placeholder="e.g. Star"
               />
-              <span className="form-hint">Shown as a badge on product cards (optional)</span>
+              <span className="form-hint">Package name recorded on the buyer's profile (optional)</span>
             </div>
           </div>
           <div className="form-group">
-            <label className="form-label">Rank Order (tier for auto-upgrade)</label>
+            <label className="form-label">Display Order</label>
             <input
               type="number"
               className="form-input"
@@ -835,7 +838,7 @@ const AdminProducts = () => {
               min="0"
               placeholder="1 = lowest rank"
             />
-            <span className="form-hint">Auto-repurchase buys the next higher tier when the repurchase wallet affords it. Use 1, 2, 3, 4… (0 = not a rank)</span>
+            <span className="form-hint">Lower numbers are listed first (1 = main package)</span>
           </div>
 
           <div className="form-group">
@@ -874,7 +877,18 @@ const AdminProducts = () => {
             {(formData.designs || []).map((design, designIdx) => (
               <div className="design-editor" key={designIdx}>
                 <div className="design-editor-header">
-                  <span className="design-editor-title">Design {designIdx + 1}</span>
+                  <span className="design-editor-title">
+                    Design {designIdx + 1}
+                    {design.out_of_stock && <span className="design-oos-badge">Out of stock</span>}
+                  </span>
+                  <label className="design-stock-toggle" title="Buyers can still see this design but cannot purchase it">
+                    <input
+                      type="checkbox"
+                      checked={!!design.out_of_stock}
+                      onChange={(e) => updateDesignField(designIdx, 'out_of_stock', e.target.checked)}
+                    />
+                    Out of stock
+                  </label>
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm text-danger"
@@ -883,27 +897,25 @@ const AdminProducts = () => {
                     🗑️ Remove
                   </button>
                 </div>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Design Name *</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={design.name}
-                      onChange={(e) => updateDesignField(designIdx, 'name', e.target.value)}
-                      placeholder="e.g. Design 1 — Grey"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Short Description</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={design.description}
-                      onChange={(e) => updateDesignField(designIdx, 'description', e.target.value)}
-                      placeholder="Short description shown to the buyer"
-                    />
-                  </div>
+                <div className="form-group">
+                  <label className="form-label">Design Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={design.name}
+                    onChange={(e) => updateDesignField(designIdx, 'name', e.target.value)}
+                    placeholder="e.g. Design 1 — Grey"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Description</label>
+                  <textarea
+                    className="form-input"
+                    value={design.description}
+                    onChange={(e) => updateDesignField(designIdx, 'description', e.target.value)}
+                    rows={3}
+                    placeholder="Description shown to the buyer"
+                  />
                 </div>
                 <div className="form-group">
                   <label className="form-label">YouTube Video Link (optional)</label>
@@ -966,8 +978,22 @@ const AdminProducts = () => {
                 checked={formData.is_active}
                 onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
               />
-              <span>Active (available for purchase)</span>
+              <span>Active (shown to users)</span>
             </label>
+          </div>
+          <div className="form-group">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={!!formData.is_purchasable}
+                onChange={(e) => setFormData({ ...formData, is_purchasable: e.target.checked })}
+              />
+              <span>Purchasable main package</span>
+            </label>
+            <span className="form-hint">
+              Unchecked = display-only repurchase product: users see Buy Now but get a "Repurchase coming soon" notice.
+              Team income (above) is paid only on purchasable packages.
+            </span>
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
@@ -1424,6 +1450,30 @@ const AdminProducts = () => {
           font-size: 0.875rem;
           font-weight: 600;
           color: var(--gray-800, #1f2937);
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+        }
+
+        .design-oos-badge {
+          font-size: 0.7rem;
+          font-weight: 600;
+          padding: 0.1rem 0.5rem;
+          border-radius: 999px;
+          background: #fee2e2;
+          color: #b91c1c;
+        }
+
+        .design-stock-toggle {
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+          margin-left: auto;
+          margin-right: 0.5rem;
+          font-size: 0.8rem;
+          font-weight: 500;
+          color: var(--gray-700, #374151);
+          cursor: pointer;
         }
 
         .design-editor .form-group {

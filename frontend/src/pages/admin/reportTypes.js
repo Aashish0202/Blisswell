@@ -4,9 +4,9 @@
 export const REPORT_TABS = [
   { key: 'sales', slug: 'sales', label: 'Sales' },
   { key: 'teamIncome', slug: 'team-income', label: 'Team Income' },
+  { key: 'rewardIncome', slug: 'reward-income', label: 'Reward Income' },
   { key: 'withdrawals', slug: 'withdrawals', label: 'Withdrawals' },
   { key: 'userEarnings', slug: 'user-earnings', label: 'User Earnings' },
-  { key: 'ranks', slug: 'ranks', label: 'Ranks' },
   { key: 'referrals', slug: 'referrals', label: 'Referrals' },
   { key: 'wallet', slug: 'wallet', label: 'Wallet' },
   { key: 'userFinancial', slug: 'user-financial', label: 'User Financial' },

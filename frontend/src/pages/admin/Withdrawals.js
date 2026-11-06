@@ -6,6 +6,53 @@ import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
 import Pagination from '../../components/Pagination';
 
+const KYC_BADGE = {
+  approved: { cls: 'badge-success', label: 'KYC Approved' },
+  pending: { cls: 'badge-warning', label: 'KYC Pending' },
+  rejected: { cls: 'badge-danger', label: 'KYC Rejected' }
+};
+
+const copyText = (value, what) => {
+  if (!value) return;
+  try {
+    navigator.clipboard.writeText(String(value));
+    toast.success(`${what} copied`);
+  } catch (e) {
+    toast.error('Copy failed');
+  }
+};
+
+// Bank + KYC details of the withdrawal's user (latest user_kyc row).
+// `full` = roomier layout with PAN + nominee, used in the Process dialog.
+const BankDetails = ({ w, full = false }) => {
+  if (!w.bank_name && !w.account_number) {
+    return <span className="badge badge-danger">No bank KYC</span>;
+  }
+  const kyc = KYC_BADGE[w.kyc_status] || { cls: 'badge-neutral', label: 'KYC —' };
+  return (
+    <div className={`bank-cell${full ? ' bank-cell-full' : ''}`}>
+      <span className="bank-name">{w.bank_name}{w.branch_name ? ` · ${w.branch_name}` : ''}</span>
+      <span className="bank-line">
+        A/C: <strong>{w.account_number}</strong>
+        <button type="button" className="copy-btn" title="Copy account number" onClick={() => copyText(w.account_number, 'Account number')}>⧉</button>
+      </span>
+      <span className="bank-line">
+        IFSC: <strong>{w.ifsc_code}</strong>
+        <button type="button" className="copy-btn" title="Copy IFSC" onClick={() => copyText(w.ifsc_code, 'IFSC')}>⧉</button>
+      </span>
+      {full && (
+        <>
+          <span className="bank-line">PAN: <strong>{w.pan_number || '—'}</strong>{w.pan_status ? ` (${w.pan_status})` : ''}</span>
+          {w.nominee_name && (
+            <span className="bank-line">Nominee: {w.nominee_name}{w.nominee_relation ? ` (${w.nominee_relation})` : ''}</span>
+          )}
+        </>
+      )}
+      <span className={`badge ${kyc.cls} bank-kyc-badge`}>{kyc.label}</span>
+    </div>
+  );
+};
+
 const AdminWithdrawals = () => {
   const [withdrawals, setWithdrawals] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19,7 +66,7 @@ const AdminWithdrawals = () => {
   // Reject reason modal
   const [rejectTarget, setRejectTarget] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
-  // Withdrawal split config (5% admin charge / 20% repurchase) — lets pending
+  // Withdrawal split config (5% admin charge / 95% payout) — lets pending
   // rows show their expected split before processing records the real values.
   const [wdConfig, setWdConfig] = useState(null);
   // Confirm for process/reverse
@@ -115,15 +162,13 @@ const AdminWithdrawals = () => {
   const splitOf = (w) => {
     const amt = parseFloat(w.amount) || 0;
     if (w.status === 'processed') {
-      return { admin: w.admin_charge, repurchase: w.repurchase_amount, payout: w.payout_amount, estimated: false };
+      return { admin: w.admin_charge, payout: w.payout_amount, estimated: false };
     }
     if (w.status === 'pending' && wdConfig) {
       const adminPct = Number(wdConfig.adminChargePercent ?? 0);
-      const repPct = Number(wdConfig.repurchaseSharePercent ?? 0);
       return {
         admin: amt * adminPct / 100,
-        repurchase: amt * repPct / 100,
-        payout: amt * (100 - adminPct - repPct) / 100,
+        payout: amt * (100 - adminPct) / 100,
         estimated: true
       };
     }
@@ -203,9 +248,9 @@ const AdminWithdrawals = () => {
                 <thead>
                   <tr>
                     <th>User</th>
+                    <th>Bank / KYC</th>
                     <th>Amount</th>
-                    <th>Admin Charge (5%)</th>
-                    <th>Repurchase (20%)</th>
+                    <th>Admin Charge{wdConfig ? ` (${wdConfig.adminChargePercent}%)` : ''}</th>
                     <th>Payout</th>
                     <th>Status</th>
                     <th>Requested</th>
@@ -224,11 +269,12 @@ const AdminWithdrawals = () => {
                           <span className="user-name">{w.name}</span>
                           <span className="user-email">{w.email}</span>
                           <span className="user-mobile">{w.mobile}</span>
+                          {w.referral_code && <span className="user-mobile">ID: {w.referral_code}</span>}
                         </div>
                       </td>
+                      <td><BankDetails w={w} /></td>
                       <td className="text-primary font-semibold">{fmt(w.amount)}</td>
                       <td>{split ? (split.estimated ? <span className="text-muted">{fmt(split.admin)}<span className="est-tag"> est.</span></span> : fmt(split.admin)) : '—'}</td>
-                      <td>{split ? (split.estimated ? <span className="text-muted">{fmt(split.repurchase)}<span className="est-tag"> est.</span></span> : fmt(split.repurchase)) : '—'}</td>
                       <td className="text-success font-semibold">{split ? (split.estimated ? <span className="text-muted">{fmt(split.payout)}<span className="est-tag"> est.</span></span> : fmt(split.payout)) : '—'}</td>
                       <td>{statusBadge(w.status)}</td>
                       <td className="text-muted datetime-cell">{formatDateTime(w.created_at)}</td>
@@ -238,7 +284,7 @@ const AdminWithdrawals = () => {
                         {w.status === 'pending' && (
                           <>
                             <button className="btn btn-success btn-sm" disabled={actionLoading === w.id}
-                              onClick={() => setConfirmAction({ type: 'process', id: w.id, label: `Process ₹${parseFloat(w.amount).toLocaleString()} for ${w.name}?` })}>
+                              onClick={() => setConfirmAction({ type: 'process', id: w.id, w, label: `Process ₹${parseFloat(w.amount).toLocaleString()} for ${w.name}?` })}>
                               Process
                             </button>
                             <button className="btn btn-danger btn-sm" disabled={actionLoading === w.id}
@@ -277,6 +323,12 @@ const AdminWithdrawals = () => {
           <div className="modal-box" onClick={(e) => e.stopPropagation()}>
             <h3>Confirm</h3>
             <p>{confirmAction.label}</p>
+            {confirmAction.type === 'process' && confirmAction.w && (
+              <div className="bank-confirm">
+                <div className="bank-confirm-title">Pay to</div>
+                <BankDetails w={confirmAction.w} full />
+              </div>
+            )}
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => setConfirmAction(null)}>Cancel</button>
               <button className="btn btn-primary" disabled={actionLoading === confirmAction.id}
@@ -334,6 +386,18 @@ const AdminWithdrawals = () => {
         .modal-actions { display:flex; gap:0.75rem; justify-content:flex-end; }
         .btn-warning { background:#f59e0b; color:#fff; }
         .est-tag { font-size:0.65rem; color:#9ca3af; }
+
+        .bank-cell { display:flex; flex-direction:column; gap:0.125rem; font-size:0.75rem; color:#4b5563; min-width:190px; }
+        .bank-name { font-weight:500; color:#1f2937; font-size:0.8125rem; }
+        .bank-line { display:flex; align-items:center; gap:0.25rem; white-space:nowrap; }
+        .bank-line strong { color:#111827; font-weight:600; letter-spacing:0.02em; }
+        .bank-kyc-badge { align-self:flex-start; margin-top:0.25rem; font-size:0.65rem; }
+        .copy-btn { border:none; background:none; cursor:pointer; color:#6b7280; padding:0 0.15rem; font-size:0.8rem; line-height:1; }
+        .copy-btn:hover { color:#111827; }
+        .bank-cell-full { font-size:0.875rem; gap:0.3rem; }
+        .bank-cell-full .bank-name { font-size:0.95rem; }
+        .bank-confirm { background:var(--gray-50); border:1px solid var(--gray-200); border-radius:var(--radius-md); padding:0.75rem 1rem; margin-bottom:1rem; }
+        .bank-confirm-title { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--gray-500); margin-bottom:0.35rem; }
       `}</style>
     </AdminLayout>
   );

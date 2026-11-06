@@ -84,16 +84,21 @@ const AdminUsers = () => {
     try {
       await adminAPI.approvePAN(userId);
       toast.success('PAN approved');
+      // Keep the open KYC modal in sync
+      setKycModal(prev => (prev.user && prev.user.id === userId
+        ? { ...prev, user: { ...prev.user, pan_status: 'approved' } }
+        : prev));
       fetchUsers();
     } catch (error) {
       toast.error('Failed to approve PAN');
     }
   };
 
-  const viewKYC = async (userId) => {
+  const viewKYC = async (user) => {
+    const userId = user.id;
     try {
       const response = await adminAPI.getUserKYC(userId);
-      setKycModal({ isOpen: true, kyc: response.data.kyc, userId });
+      setKycModal({ isOpen: true, kyc: response.data.kyc, userId, user });
       setRejectReason('');
       setEditMode(false);
       if (response.data.kyc) {
@@ -126,7 +131,7 @@ const AdminUsers = () => {
       setEditMode(false);
       // Refresh KYC data
       const response = await adminAPI.getUserKYC(kycModal.userId);
-      setKycModal({ isOpen: true, kyc: response.data.kyc, userId: kycModal.userId });
+      setKycModal(prev => ({ ...prev, kyc: response.data.kyc }));
     } catch (error) {
       toast.error('Failed to update KYC');
     } finally {
@@ -269,6 +274,15 @@ const AdminUsers = () => {
     { key: 'mobile', label: 'Mobile' },
     { key: 'referral_code', label: 'Referral Code' },
     {
+      key: 'sponsor_code',
+      label: 'Sponsor ID',
+      render: (value, row) => value ? (
+        <span title={row.sponsor_name || ''}>{value}</span>
+      ) : (
+        <span style={{ color: '#9ca3af' }}>—</span>
+      )
+    },
+    {
       key: 'pan_status',
       label: 'PAN Status',
       render: (value, row) => (
@@ -291,12 +305,12 @@ const AdminUsers = () => {
           }`}>
             {value || 'Not Submitted'}
           </span>
-          {value && value !== 'approved' && (
+          {value && (
             <button
               className="btn btn-sm btn-ghost"
               onClick={(e) => {
                 e.stopPropagation();
-                viewKYC(row.id);
+                viewKYC(row);
               }}
               title="View KYC Details"
             >
@@ -320,15 +334,6 @@ const AdminUsers = () => {
       label: 'Rank',
       render: (value) => (
         value ? <span className={rankBadgeClass(value)}>🏆 {value}</span> : <span className="text-muted">—</span>
-      )
-    },
-    {
-      key: 'repurchase_balance',
-      label: 'Repurchase Wallet',
-      render: (value) => (
-        <span className="text-warning font-semibold">
-          ₹{Number(value || 0).toLocaleString('en-IN')}
-        </span>
       )
     },
     {
@@ -365,6 +370,17 @@ const AdminUsers = () => {
           >
             🔑 Login
           </button>
+          <button
+            className="btn btn-secondary btn-sm"
+            style={row.kyc_status === 'pending' ? { background: '#f59e0b', borderColor: '#f59e0b', color: '#fff' } : undefined}
+            onClick={(e) => {
+              e.stopPropagation();
+              viewKYC(row);
+            }}
+            title="Check and verify KYC"
+          >
+            🪪 KYC
+          </button>
           {row.pan_status === 'pending' && (
             <button
               className="btn btn-success btn-sm"
@@ -395,11 +411,12 @@ const AdminUsers = () => {
     { key: 'email', label: 'Email' },
     { key: 'mobile', label: 'Mobile' },
     { key: 'referral_code', label: 'Referral Code' },
+    { key: 'sponsor_code', label: 'Sponsor ID' },
+    { key: 'sponsor_name', label: 'Sponsor Name' },
     { key: 'pan_number', label: 'PAN Number' },
     { key: 'pan_status', label: 'PAN Status' },
     { key: 'has_active_package', label: 'Has Active Package' },
     { key: 'rank_name', label: 'Rank' },
-    { key: 'repurchase_balance', label: 'Repurchase Wallet' },
     { key: 'is_active', label: 'Status' },
     { key: 'created_at', label: 'Joined' }
   ];
@@ -548,12 +565,46 @@ const AdminUsers = () => {
         <div className="modal-overlay" onClick={() => setKycModal({ isOpen: false, kyc: null, userId: null })}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>KYC Details {editMode && '(Edit Mode)'}</h3>
+              <h3>
+                KYC Details{kycModal.user ? ` — ${kycModal.user.name}` : ''} {editMode && '(Edit Mode)'}
+              </h3>
               <button className="modal-close" onClick={() => setKycModal({ isOpen: false, kyc: null, userId: null })}>
                 ×
               </button>
             </div>
             <div className="modal-body">
+              {kycModal.user && !editMode && (
+                <>
+                  <div className="kyc-detail-row">
+                    <span className="kyc-label">Referral Code:</span>
+                    <span className="kyc-value">{kycModal.user.referral_code}</span>
+                  </div>
+                  <div className="kyc-detail-row">
+                    <span className="kyc-label">PAN Number:</span>
+                    <span className="kyc-value">{kycModal.user.pan_number || 'Not provided'}</span>
+                  </div>
+                  <div className="kyc-detail-row">
+                    <span className="kyc-label">PAN Status:</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className={`badge badge-${
+                        kycModal.user.pan_status === 'approved' ? 'success' :
+                        kycModal.user.pan_status === 'rejected' ? 'danger' : 'warning'
+                      }`}>
+                        {kycModal.user.pan_status || 'pending'}
+                      </span>
+                      {kycModal.user.pan_status === 'pending' && kycModal.user.pan_number && (
+                        <button
+                          className="btn btn-success btn-sm"
+                          onClick={() => approvePAN(kycModal.user.id)}
+                        >
+                          ✓ Approve PAN
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                  <hr style={{ margin: '0.75rem 0', border: 'none', borderTop: '1px solid var(--border-color, #e5e7eb)' }} />
+                </>
+              )}
               {kycModal.kyc ? (
                 <>
                   {editMode ? (
@@ -654,7 +705,13 @@ const AdminUsers = () => {
                         <span className="kyc-value">{kycModal.kyc.nominee_relation || 'N/A'}</span>
                       </div>
                       <div className="kyc-detail-row">
-                        <span className="kyc-label">Status:</span>
+                        <span className="kyc-label">Submitted:</span>
+                        <span className="kyc-value">
+                          {kycModal.kyc.submitted_at ? new Date(kycModal.kyc.submitted_at).toLocaleString('en-IN') : 'N/A'}
+                        </span>
+                      </div>
+                      <div className="kyc-detail-row">
+                        <span className="kyc-label">KYC Status:</span>
                         <span className={`badge badge-${
                           kycModal.kyc.kyc_status === 'approved' ? 'success' :
                           kycModal.kyc.kyc_status === 'rejected' ? 'danger' : 'warning'
@@ -699,6 +756,16 @@ const AdminUsers = () => {
                         >
                           ✏️ Edit KYC
                         </button>
+                        {kycModal.kyc.kyc_status === 'rejected' && (
+                          <div className="action-buttons-row">
+                            <button
+                              className="btn btn-success"
+                              onClick={() => approveKYC(kycModal.kyc.id)}
+                            >
+                              ✓ Approve KYC
+                            </button>
+                          </div>
+                        )}
                         {kycModal.kyc.kyc_status === 'pending' && (
                           <>
                             <div className="reject-section">

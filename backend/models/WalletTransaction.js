@@ -36,6 +36,15 @@ const WalletTransaction = {
     return rows[0];
   },
 
+  // Lifetime milestone reward income (Bike/Car Fund) for one user.
+  async sumRewards(userId, connection = pool) {
+    const [[row]] = await connection.execute(
+      "SELECT COALESCE(SUM(amount),0) AS total FROM wallet_transactions WHERE user_id = ? AND type = 'reward' AND status = 'completed'",
+      [userId]
+    );
+    return parseFloat(row.total) || 0;
+  },
+
   // Get transactions by user ID
   async getByUserId(userId, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
@@ -66,7 +75,8 @@ const WalletTransaction = {
       `SELECT
         COALESCE(SUM(CASE WHEN amount > 0 AND status = 'completed' THEN amount ELSE 0 END), 0) AS total_earned,
         COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status = 'completed' THEN ABS(amount) ELSE 0 END), 0) AS total_withdrawn,
-        COALESCE(SUM(CASE WHEN type IN ('purchase', 'repurchase') AND status = 'completed' THEN ABS(amount) ELSE 0 END), 0) AS total_spent
+        COALESCE(SUM(CASE WHEN type IN ('purchase', 'repurchase') AND status = 'completed' THEN ABS(amount) ELSE 0 END), 0) AS total_spent,
+        COALESCE(SUM(CASE WHEN type = 'reward' AND status = 'completed' THEN amount ELSE 0 END), 0) AS reward_income
        FROM wallet_transactions
        WHERE user_id = ?`,
       [userId]
@@ -75,7 +85,8 @@ const WalletTransaction = {
     return {
       total_earned: parseFloat(r.total_earned) || 0,
       total_withdrawn: parseFloat(r.total_withdrawn) || 0,
-      total_spent: parseFloat(r.total_spent) || 0
+      total_spent: parseFloat(r.total_spent) || 0,
+      reward_income: parseFloat(r.reward_income) || 0
     };
   },
 

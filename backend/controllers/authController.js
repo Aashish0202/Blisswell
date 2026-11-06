@@ -181,6 +181,7 @@ exports.getMe = async (req, res) => {
         pan_status: user.pan_status,
         referral_code: user.referral_code,
         referred_by: user.referred_by,
+        role: user.role,
         has_active_package: user.has_active_package,
         is_active: user.is_active,
         created_at: user.created_at

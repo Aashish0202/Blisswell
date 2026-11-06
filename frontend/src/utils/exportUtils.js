@@ -3,6 +3,14 @@
 // (via html2pdf.js, already a project dependency).
 //
 // All three take an array of row objects + a columns spec [{key, label}].
+// Add `text: true` to a column (account numbers, IFSC, IDs) so Excel keeps
+// it verbatim instead of turning 000123456789 into 1.23457E+11.
+
+// CSV: ="value" is the Excel-recognised way to force a text cell.
+const csvText = (value) => {
+  if (value === null || value === undefined || value === '') return '';
+  return `"=""${String(value).replace(/"/g, '""""')}"""`;
+};
 
 const escapeCsv = (value) => {
   if (value === null || value === undefined) return '';
@@ -16,7 +24,7 @@ const escapeCsv = (value) => {
 export const exportToCSV = (data, columns, filename = 'export') => {
   if (!data || data.length === 0) return;
   const headers = columns.map(c => c.label).join(',');
-  const rows = data.map(row => columns.map(c => escapeCsv(row[c.key])).join(','));
+  const rows = data.map(row => columns.map(c => (c.text ? csvText(row[c.key]) : escapeCsv(row[c.key]))).join(','));
   const csv = [headers, ...rows].join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
   triggerDownload(blob, `${filename}.csv`);
@@ -32,7 +40,7 @@ export const exportToExcel = (data, columns, filename = 'export') => {
   };
   const thead = `<tr>${columns.map(c => `<th>${esc(c.label)}</th>`).join('')}</tr>`;
   const tbody = data.map(row =>
-    `<tr>${columns.map(c => `<td>${esc(row[c.key])}</td>`).join('')}</tr>`
+    `<tr>${columns.map(c => `<td${c.text ? ' style="mso-number-format:\'\\@\'"' : ''}>${esc(row[c.key])}</td>`).join('')}</tr>`
   ).join('');
   const html = `<table border="1">${thead}${tbody}</table>`;
   const blob = new Blob(['﻿' + html], { type: 'application/vnd.ms-excel;charset=utf-8;' });

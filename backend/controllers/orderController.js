@@ -5,26 +5,43 @@ const Order = require('../models/Order');
 const Product = require('../models/Product');
 
 // Resolve the design selection for a purchase. Returns the normalized
-// design name (null for products without designs) or an error message.
-// Products WITH designs require an explicit, matching design_name.
-function resolveDesign(product, designName) {
+// design name + image snapshot (nulls for products without designs) or an
+// error message. Products WITH designs require an explicit, matching
+// design_name. Out-of-stock designs are rejected unless allowOutOfStock is
+// set — used after payment, where the buyer has already paid and must not
+// be bounced because the admin flagged the design in the meantime.
+function resolveDesign(product, designName, { allowOutOfStock = false } = {}) {
   if (!designName) {
     if ((product.designs || []).length > 0) {
       return { error: 'Please select a design before purchasing' };
     }
-    return { name: null };
+    return { name: null, image: null };
   }
   const match = Product.findDesign(product, String(designName).trim());
   if (!match || !match.design) {
     return { error: `Invalid design selection for ${product.name}` };
   }
-  return { name: match.design.name };
+  if (match.design.out_of_stock && !allowOutOfStock) {
+    return { error: `${match.design.name} is out of stock. Please select another design.` };
+  }
+  return { name: match.design.name, image: match.design.images[0] || null };
 }
+exports.resolveDesign = resolveDesign;
+
+// Only the main package is sold; every other product is display-only
+// ("repurchase product — repurchase coming soon").
+const NOT_PURCHASABLE = {
+  message: 'This is a repurchase product. Repurchase is coming soon.',
+  error: 'NOT_PURCHASABLE'
+};
 const WalletTransaction = require('../models/WalletTransaction');
 const teamIncomeService = require('../services/teamIncomeService');
+const rewardService = require('../services/rewardService');
 const emailService = require('../utils/emailService');
 const { allocateInvoiceNumber } = require('../utils/helpers');
-const { getUpgradeInfo } = require('./userController');
+const { settleCapturedPurchase } = require('../services/razorpayPurchaseService');
+const Settings = require('../models/Settings');
+const PaymentRequest = require('../models/PaymentRequest');
 const crypto = require('crypto');
 const razorpay = require('../config/razorpay');
 
@@ -50,6 +67,9 @@ exports.purchaseProduct = async (req, res) => {
     }
     if (!product.is_active) {
       return res.status(400).json({ message: 'Product is not available for purchase' });
+    }
+    if (!product.is_purchasable) {
+      return res.status(400).json(NOT_PURCHASABLE);
     }
 
     console.log(`Product: ${product.name}, Price: ${product.price}`);
@@ -77,13 +97,11 @@ exports.purchaseProduct = async (req, res) => {
 
     console.log(`User: ${user.email}, PAN: ${user.pan_status}, Has package: ${user.has_active_package}`);
 
-    // One-time purchase rule: a user buys a package once. Any higher rank is
-    // upgraded exclusively through the auto-repurchase engine (repurchase
-    // wallet), never by a second manual purchase.
+    // One-time purchase rule: a user buys the package once.
     if (user.has_active_package) {
       await connection.rollback();
       return res.status(400).json({
-        message: 'One-time purchase only: you already own a package. Higher ranks are upgraded automatically from your Repurchase Wallet.',
+        message: 'One-time purchase only: you have already purchased the package.',
         error: 'ALREADY_PURCHASED'
       });
     }
@@ -136,9 +154,9 @@ exports.purchaseProduct = async (req, res) => {
     // as the product actually ships. 'processing' is reserved for gateway
     // payments that are still pending verification.
     const [orderResult] = await connection.execute(
-      `INSERT INTO orders (user_id, product_id, design_name, amount, payment_type, status, order_number)
-       VALUES (?, ?, ?, ?, 'wallet', 'pending', ?)`,
-      [userId, product.id, design.name, product.price, invoiceNumber] //here
+      `INSERT INTO orders (user_id, product_id, design_name, design_image, amount, payment_type, status, order_number)
+       VALUES (?, ?, ?, ?, ?, 'wallet', 'pending', ?)`,
+      [userId, product.id, design.name, design.image, product.price, invoiceNumber] //here
     );
     const orderId = orderResult.insertId;
 
@@ -174,8 +192,9 @@ exports.purchaseProduct = async (req, res) => {
 
     console.log('Purchase completed successfully');
 
-    // Next auto-upgrade info for the post-purchase popup
-    const nextUpgrade = await getUpgradeInfo(userId);
+    // Milestone rewards: recompute this member + 6 uplines (after commit).
+    rewardService.scheduleActivation(userId);
+
 
     // Send purchase confirmation email (don't await to not block response)
     emailService.sendPurchaseEmail(
@@ -189,8 +208,7 @@ exports.purchaseProduct = async (req, res) => {
       message: 'Purchase successful!',
       order_id: orderId,
       product_name: product.name,
-      amount: product.price,
-      nextUpgrade
+      amount: product.price
     });
 
   } catch (error) {
@@ -277,6 +295,13 @@ exports.createPaymentOrder = async (req, res) => {
       });
     }
 
+    if (!(await Settings.getPaymentSettings()).razorpayEnabled) {
+      return res.status(400).json({
+        message: 'Online payment is currently unavailable. Please use another payment option.',
+        error: 'RAZORPAY_DISABLED'
+      });
+    }
+
     const { product_id } = req.body;
     const userId = req.user.id;
 
@@ -292,6 +317,9 @@ exports.createPaymentOrder = async (req, res) => {
     if (!product.is_active) {
       return res.status(400).json({ message: 'Product is not available for purchase' });
     }
+    if (!product.is_purchasable) {
+      return res.status(400).json(NOT_PURCHASABLE);
+    }
 
     // Validate design selection (required for products that have designs) —
     // stored on the 'processing' order now and carried through verification.
@@ -300,13 +328,19 @@ exports.createPaymentOrder = async (req, res) => {
       return res.status(400).json({ message: design.error });
     }
 
-    // One-time purchase rule (see purchaseProduct): second manual buys are
-    // blocked — upgrades come from the auto-repurchase engine only.
+    // One-time purchase rule (see purchaseProduct).
     const user = await User.findById(userId);
     if (user.has_active_package) {
       return res.status(400).json({
-        message: 'One-time purchase only: you already own a package. Higher ranks are upgraded automatically from your Repurchase Wallet.',
+        message: 'One-time purchase only: you have already purchased the package.',
         error: 'ALREADY_PURCHASED'
+      });
+    }
+    // A QR payment awaiting admin review would be a second payment.
+    if (await PaymentRequest.getPendingForUser(userId)) {
+      return res.status(400).json({
+        message: 'You already have a QR payment awaiting admin approval.',
+        error: 'REQUEST_PENDING'
       });
     }
 
@@ -332,9 +366,9 @@ exports.createPaymentOrder = async (req, res) => {
     // when the payment is actually confirmed, so failed/abandoned payments
     // never consume a sequential number.
     const [orderResult] = await connection.execute(
-      `INSERT INTO orders (user_id, product_id, design_name, amount, payment_type, status, order_number)
-       VALUES (?, ?, ?, ?, 'razorpay', 'processing', NULL)`,
-      [userId, product.id, design.name, product.price]
+      `INSERT INTO orders (user_id, product_id, design_name, design_image, amount, payment_type, status, order_number)
+       VALUES (?, ?, ?, ?, ?, 'razorpay', 'processing', NULL)`,
+      [userId, product.id, design.name, design.image, product.price]
     );
     const orderId = orderResult.insertId;
 
@@ -370,15 +404,12 @@ exports.createPaymentOrder = async (req, res) => {
 
 // Verify Razorpay payment and create order
 exports.verifyAndPurchase = async (req, res) => {
-  const connection = await pool.getConnection();
-
   try {
     const {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
-      product_id,
-      design_name
+      product_id
     } = req.body;
 
     const userId = req.user.id;
@@ -394,15 +425,77 @@ exports.verifyAndPurchase = async (req, res) => {
       return res.status(400).json({ message: 'Invalid payment signature' });
     }
 
-    // Get product
+    // Settle through the shared service (same path as the Razorpay webhook),
+    // so whichever of browser callback / webhook arrives second is a no-op.
+    const result = await settleCapturedPurchase({
+      razorpayOrderId: razorpay_order_id,
+      razorpayPaymentId: razorpay_payment_id,
+      expectedUserId: userId
+    });
+
+    if (result.status === 'not_found') {
+      // No 'processing' order row for this Razorpay order (shouldn't normally happen)
+      return verifyWithoutOrderRow(req, res);
+    }
+    if (result.status === 'user_already_active') {
+      return res.status(400).json({
+        message: 'One-time purchase only: you have already purchased the package.',
+        error: 'ALREADY_PURCHASED'
+      });
+    }
+    if (result.status !== 'settled' && result.status !== 'already_settled') {
+      console.error(`verifyAndPurchase: ${result.status} for ${razorpay_order_id} (user ${userId})`);
+      return res.status(400).json({ message: 'Payment could not be matched to your order. Please contact support.' });
+    }
+
+    const product = result.product || await Product.getById(product_id);
+
+
+    if (result.status === 'settled') {
+      emailService.sendPurchaseEmail(
+        { name: result.user.name, email: result.user.email },
+        { id: result.orderId, total_amount: product.price },
+        product
+      ).catch(err => console.error('Purchase email error:', err));
+    }
+
+    res.json({
+      success: true,
+      message: 'Purchase successful!',
+      order_id: result.orderId,
+      order_number: result.invoiceNumber,
+      product_name: product && product.name,
+      amount: product && product.price
+    });
+  } catch (error) {
+    console.error('Verify and purchase error:', error);
+    res.status(500).json({ message: 'Purchase failed. Please contact support.', error: error.message });
+  }
+};
+
+// Fallback for verifyAndPurchase when no order row exists for the Razorpay
+// order: create the order from the request (signature already verified).
+async function verifyWithoutOrderRow(req, res) {
+  const connection = await pool.getConnection();
+
+  try {
+    const { razorpay_order_id, razorpay_payment_id, product_id, design_name } = req.body;
+    const userId = req.user.id;
+
     const product = await Product.getById(product_id);
     if (!product) {
       return res.status(404).json({ message: 'Product not found' });
     }
 
+    // Payment already captured — accept the design even if it was flagged
+    // out of stock after checkout started.
+    const design = resolveDesign(product, design_name, { allowOutOfStock: true });
+    if (design.error) {
+      return res.status(400).json({ message: design.error });
+    }
+
     await connection.beginTransaction();
 
-    // Get user with lock
     const [userRows] = await connection.execute(
       'SELECT * FROM users WHERE id = ? FOR UPDATE',
       [userId]
@@ -414,90 +507,36 @@ exports.verifyAndPurchase = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // One-time purchase rule (see purchaseProduct): blocks a second manual
-    // buy even if a payment somehow reaches verification.
     if (user.has_active_package) {
       await connection.rollback();
       return res.status(400).json({
-        message: 'One-time purchase only: you already own a package. Higher ranks are upgraded automatically from your Repurchase Wallet.',
+        message: 'One-time purchase only: you have already purchased the package.',
         error: 'ALREADY_PURCHASED'
       });
     }
 
-    // Find existing order from wallet_transactions using razorpay_order_id
-    const [existingOrderRows] = await connection.execute(
-      `SELECT wt.order_id, o.design_name
-       FROM wallet_transactions wt
-       JOIN orders o ON o.id = wt.order_id
-       WHERE wt.payment_id = ? AND wt.user_id = ? AND wt.status = 'pending'`,
-      [razorpay_order_id, userId]
+    console.warn(`No existing order found for razorpay_order_id: ${razorpay_order_id}, creating new order`);
+
+    const invoiceNumber = await allocateInvoiceNumber(connection);
+
+    const [orderResult] = await connection.execute(
+      `INSERT INTO orders (user_id, product_id, design_name, design_image, amount, payment_type, status, order_number)
+       VALUES (?, ?, ?, ?, ?, 'razorpay', 'pending', ?)`,
+      [userId, product.id, design.name, design.image, product.price, invoiceNumber]
+    );
+    const orderId = orderResult.insertId;
+
+    await connection.execute(
+      `INSERT INTO wallet_transactions (user_id, type, amount, payment_id, order_id, status, description)
+       VALUES (?, 'purchase', ?, ?, ?, 'completed', ?)`,
+      [userId, -product.price, razorpay_payment_id, orderId, `Purchase: ${product.name}`]
     );
 
-    let orderId;
-    let invoiceNumber;
-
-    // Design was already validated and stored on the 'processing' order in
-    // createPaymentOrder. Only require the client to resend it for the
-    // fallback path where no prior order row exists.
-    const effectiveDesignName = design_name || (existingOrderRows[0] && existingOrderRows[0].design_name) || null;
-    const design = resolveDesign(product, effectiveDesignName);
-    if (design.error) {
-      await connection.rollback();
-      return res.status(400).json({ message: design.error });
-    }
-
-    if (existingOrderRows.length > 0) {
-      // Payment verified — allocate the sequential invoice number NOW (the
-      // only point an invoice is ever issued) and move the order to 'pending'
-      // (awaiting shipment; admin marks shipped/delivered from the admin panel)
-      orderId = existingOrderRows[0].order_id;
-      invoiceNumber = await allocateInvoiceNumber(connection);
-
-      await connection.execute(
-        `UPDATE orders SET status = 'pending', order_number = ?, updated_at = NOW() WHERE id = ?`,
-        [invoiceNumber, orderId]
-      );
-
-      // Update wallet transaction to completed
-      await connection.execute(
-        `UPDATE wallet_transactions
-         SET status = 'completed',
-             payment_id = ?,
-             description = ?,
-             amount = ?
-         WHERE order_id = ? AND user_id = ?`,
-        [razorpay_payment_id, `Purchase: ${product.name}`, -product.price, orderId, userId]
-      );
-
-      console.log(`Updated existing order ${orderId} to pending status (payment verified)`);
-    } else {
-      // Fallback: Create new order if no existing order found (shouldn't normally happen)
-      console.warn(`No existing order found for razorpay_order_id: ${razorpay_order_id}, creating new order`);
-
-      invoiceNumber = await allocateInvoiceNumber(connection);
-
-      const [orderResult] = await connection.execute(
-        `INSERT INTO orders (user_id, product_id, design_name, amount, payment_type, status, order_number)
-         VALUES (?, ?, ?, ?, 'razorpay', 'pending', ?)`,
-        [userId, product.id, design.name, product.price, invoiceNumber]
-      );
-      orderId = orderResult.insertId;
-
-      // Create wallet transaction record for the purchase
-      await connection.execute(
-        `INSERT INTO wallet_transactions (user_id, type, amount, payment_id, order_id, status, description)
-         VALUES (?, 'purchase', ?, ?, ?, 'completed', ?)`,
-        [userId, -product.price, razorpay_payment_id, orderId, `Purchase: ${product.name}`]
-      );
-    }
-
-    // Set user active package + rank (initial purchase defines the rank)
     await connection.execute(
       'UPDATE users SET has_active_package = TRUE, rank_name = ?, current_product_id = ?, updated_at = NOW() WHERE id = ?',
       [product.rank_name, product.id, userId]
     );
 
-    // Team Income distribution (qualified upline, per the purchaser's rank table).
     await teamIncomeService.distributeForPurchase(connection, {
       purchaserId: userId,
       orderId,
@@ -505,11 +544,9 @@ exports.verifyAndPurchase = async (req, res) => {
     });
 
     await connection.commit();
+    rewardService.scheduleActivation(userId);
 
-    // Next auto-upgrade info for the post-purchase popup
-    const nextUpgrade = await getUpgradeInfo(userId);
 
-    // Send purchase confirmation email
     emailService.sendPurchaseEmail(
       { name: user.name, email: user.email },
       { id: orderId, total_amount: product.price },
@@ -522,16 +559,71 @@ exports.verifyAndPurchase = async (req, res) => {
       order_id: orderId,
       order_number: invoiceNumber,
       product_name: product.name,
-      amount: product.price,
-      nextUpgrade
+      amount: product.price
     });
-
   } catch (error) {
     await connection.rollback();
     console.error('Verify and purchase error:', error);
     res.status(500).json({ message: 'Purchase failed. Please contact support.', error: error.message });
   } finally {
     connection.release();
+  }
+}
+
+// Razorpay webhook for product purchases (payment.captured / order.paid).
+// Server-to-server backup for verifyAndPurchase: activates the purchase even
+// if the buyer's browser never came back from checkout. Signature is checked
+// against the raw request body (req.rawBody, captured in server.js).
+exports.razorpayWebhook = async (req, res) => {
+  try {
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    const signature = req.headers['x-razorpay-signature'];
+    if (!secret || !signature || !req.rawBody) {
+      return res.status(400).json({ message: 'Invalid webhook request' });
+    }
+
+    const expected = crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
+    const a = Buffer.from(expected);
+    const b = Buffer.from(String(signature));
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return res.status(400).json({ message: 'Invalid webhook signature' });
+    }
+
+    const event = req.body;
+    if (event.event !== 'payment.captured' && event.event !== 'order.paid') {
+      return res.json({ status: 'ignored' });
+    }
+
+    const payment = event.payload && event.payload.payment && event.payload.payment.entity;
+    if (!payment || !payment.order_id || payment.status !== 'captured') {
+      return res.json({ status: 'ignored' });
+    }
+
+    const result = await settleCapturedPurchase({
+      razorpayOrderId: payment.order_id,
+      razorpayPaymentId: payment.id,
+      amountPaise: payment.amount
+    });
+
+    if (result.status === 'settled') {
+      console.log(`[razorpayWebhook] Settled order ${result.orderId} (${result.invoiceNumber}) for ${payment.order_id} / ${payment.id}`);
+      emailService.sendPurchaseEmail(
+        { name: result.user.name, email: result.user.email },
+        { id: result.orderId, total_amount: result.product.price },
+        result.product
+      ).catch(err => console.error('Purchase email error:', err));
+    } else if (result.status !== 'already_settled' && result.status !== 'not_found') {
+      // not_found = not a product purchase (e.g. wallet deposit) — ignore quietly
+      console.error(`[razorpayWebhook] NEEDS REVIEW: ${result.status} for ${payment.order_id} / ${payment.id} (order ${result.orderId})`);
+    }
+
+    // Always 200 once the signature is valid, so Razorpay doesn't retry
+    // events that can never succeed; review cases are logged above.
+    res.json({ status: result.status });
+  } catch (error) {
+    // 5xx makes Razorpay retry — right for transient DB errors
+    console.error('[razorpayWebhook] Error:', error);
+    res.status(500).json({ message: 'Webhook processing failed' });
   }
 };
 

@@ -5,6 +5,7 @@ const WalletTransaction = require('../models/WalletTransaction');
 const Settings = require('../models/Settings');
 const emailService = require('../utils/emailService');
 const pool = require('../config/db');
+const { PAID_ORDER_STATUSES } = require('../models/orderStatus');
 
 // ==================== USER MANAGEMENT ====================
 
@@ -24,9 +25,10 @@ exports.getUsers = async (req, res) => {
       SELECT u.id, u.name, u.email, u.mobile, u.pan_number, u.pan_status,
              u.referral_code, u.is_active, u.has_active_package, u.created_at,
              u.rank_name, p.rank_order, COALESCE(w.repurchase_balance, 0) AS repurchase_balance,
-             k.kyc_status
+             k.kyc_status, s.referral_code AS sponsor_code, s.name AS sponsor_name
       FROM users u
       LEFT JOIN user_kyc k ON u.id = k.user_id
+      LEFT JOIN users s ON s.id = u.referred_by
       LEFT JOIN products p ON p.id = u.current_product_id
       LEFT JOIN wallets w ON w.user_id = u.id
       WHERE 1=1
@@ -307,7 +309,7 @@ exports.getProducts = async (req, res) => {
 // Create product
 exports.createProduct = async (req, res) => {
   try {
-    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link, rank_name, level_income, rank_order, designs } = req.body;
+    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link, rank_name, level_income, rank_order, designs, is_purchasable } = req.body;
 
     const productId = await Product.create({
       name,
@@ -324,6 +326,7 @@ exports.createProduct = async (req, res) => {
       level_income, // array of 10 level amounts (levels 1..10)
       rank_order,
       designs, // array of {name, description, images: []}
+      is_purchasable: !!is_purchasable, // false = display-only "repurchase coming soon"
       is_active: true
     });
 
@@ -340,7 +343,7 @@ exports.createProduct = async (req, res) => {
 // Update product
 exports.updateProduct = async (req, res) => {
   try {
-    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link, is_active, rank_name, level_income, rank_order, designs } = req.body;
+    const { name, description, price, daily_amount, days, salary_amount, salary_duration, image, images, youtube_link, is_active, rank_name, level_income, rank_order, designs, is_purchasable } = req.body;
 
     await Product.update(req.params.id, {
       name,
@@ -357,6 +360,7 @@ exports.updateProduct = async (req, res) => {
       rank_name,
       level_income, // array of 10 level amounts (levels 1..10)
       rank_order,
+      is_purchasable: is_purchasable === undefined ? undefined : !!is_purchasable,
       designs // array of {name, description, images: []}; undefined = unchanged, null/[] = clear
     });
 
@@ -379,26 +383,6 @@ exports.deleteProduct = async (req, res) => {
   }
 };
 
-// Manually run the auto-repurchase engine for one user (admin/testing).
-exports.runAutoRepurchase = async (req, res) => {
-  try {
-    const userId = parseInt(req.body.user_id, 10);
-    if (!userId) return res.status(400).json({ message: 'user_id is required' });
-
-    const autoRepurchaseService = require('../services/autoRepurchaseService');
-    const created = await autoRepurchaseService.processUser(userId);
-    res.json({
-      message: created.length > 0
-        ? `Auto repurchase completed: ${created.length} upgrade(s)`
-        : 'No upgrade possible (balance insufficient, top rank, or engine disabled)',
-      upgrades: created
-    });
-  } catch (error) {
-    console.error('Run auto repurchase error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-};
-
 // ==================== DASHBOARD + REPORTS (new income model) ====================
 
 // Get dashboard stats
@@ -416,12 +400,38 @@ exports.getDashboardStats = async (req, res) => {
          COALESCE(SUM(CASE WHEN status='processed' THEN amount ELSE 0 END),0) AS processed_amount
        FROM withdrawal_requests`
     );
-    const [[rpStats]] = await pool.execute(
-      `SELECT COALESCE(SUM(repurchase_amount),0) AS total FROM withdrawal_requests WHERE status = 'processed'`
-    );
+    // payment_requests is created at boot (PaymentRequest.ensureSchema); if
+    // it is missing (partial deploy) keep the dashboard working with zeros.
+    let qrStats = { pending_count: 0, pending_amount: 0 };
+    try {
+      [[qrStats]] = await pool.execute(
+        `SELECT COUNT(*) AS pending_count, COALESCE(SUM(amount),0) AS pending_amount
+           FROM payment_requests WHERE status = 'pending'`
+      );
+    } catch (err) {
+      if (err.code !== 'ER_NO_SUCH_TABLE') throw err;
+      console.error('Dashboard: payment_requests table missing — restart the backend with the new code or run migration 008');
+    }
     const [[tiStats]] = await pool.execute(
       `SELECT COALESCE(SUM(amount),0) AS total FROM team_income_events`
     );
+
+    // Milestone rewards (Bike / Car Fund): paid = completed 'reward' credits
+    // (same source as the user dashboard's Reward Income); awaiting = achieved
+    // but held until the member's own package is active.
+    const [[rwPaid]] = await pool.execute(
+      `SELECT COALESCE(SUM(amount),0) AS total, COUNT(*) AS cnt
+         FROM wallet_transactions WHERE type = 'reward' AND status = 'completed'`
+    );
+    let rwAwaiting = { cnt: 0, amount: 0 };
+    try {
+      [[rwAwaiting]] = await pool.execute(
+        `SELECT COUNT(*) AS cnt, COALESCE(SUM(reward_amount),0) AS amount
+           FROM user_reward_progress WHERE status = 'ACHIEVED'`
+      );
+    } catch (err) {
+      if (err.code !== 'ER_NO_SUCH_TABLE') throw err;
+    }
 
     const recentOrders = await Order.getRecent(10);
 
@@ -435,7 +445,17 @@ exports.getDashboardStats = async (req, res) => {
       },
       income: {
         team_income_paid: parseFloat(tiStats.total) || 0,
-        repurchase_credited: parseFloat(rpStats.total) || 0
+        reward_income_paid: parseFloat(rwPaid.total) || 0
+      },
+      rewards: {
+        paid_total: parseFloat(rwPaid.total) || 0,
+        paid_count: parseInt(rwPaid.cnt, 10) || 0,
+        awaiting_count: parseInt(rwAwaiting.cnt, 10) || 0,
+        awaiting_amount: parseFloat(rwAwaiting.amount) || 0
+      },
+      qrPayments: {
+        pending_count: parseInt(qrStats.pending_count, 10) || 0,
+        pending_amount: parseFloat(qrStats.pending_amount) || 0
       },
       recentOrders
     });
@@ -512,6 +532,81 @@ exports.getTeamIncomeReport = async (req, res) => {
   }
 };
 
+// Reward Income report — milestone reward credits (Bike / Car Fund).
+// Source of truth = completed 'reward' wallet_transactions (order_id holds the
+// user_reward_progress id), the same rows the dashboards sum.
+exports.getRewardIncomeReport = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+    const planId = parseInt(req.query.plan_id) || null;
+
+    const where = ["wt.type = 'reward'", "wt.status = 'completed'"];
+    const params = [];
+    if (planId) { where.push('p.reward_plan_id = ?'); params.push(planId); }
+    const whereSql = where.join(' AND ');
+    const fromSql = `
+       FROM wallet_transactions wt
+       JOIN users u ON u.id = wt.user_id
+       LEFT JOIN user_reward_progress p ON p.id = wt.order_id
+       LEFT JOIN reward_plans rp ON rp.id = p.reward_plan_id
+      WHERE ${whereSql}`;
+
+    const [rows] = await pool.execute(
+      `SELECT wt.id, wt.user_id, wt.amount, wt.created_at, wt.description, wt.reference_key,
+              u.name, u.referral_code, u.mobile, u.email,
+              rp.id AS plan_id, rp.name AS plan_name, rp.matrix_label, p.achieved_at
+       ${fromSql}
+       ORDER BY wt.created_at DESC, wt.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    const [[totals]] = await pool.execute(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(wt.amount),0) AS amount ${fromSql}`,
+      params
+    );
+    // Per-plan totals (unfiltered) for the summary cards
+    const [byPlan] = await pool.execute(
+      `SELECT rp.id AS plan_id, rp.name AS plan_name, rp.matrix_label,
+              COUNT(wt.id) AS count, COALESCE(SUM(wt.amount),0) AS amount
+         FROM reward_plans rp
+         LEFT JOIN user_reward_progress p ON p.reward_plan_id = rp.id
+         LEFT JOIN wallet_transactions wt
+                ON wt.order_id = p.id AND wt.user_id = p.user_id
+               AND wt.type = 'reward' AND wt.status = 'completed'
+        GROUP BY rp.id ORDER BY rp.sequence_order, rp.id`
+    );
+    const [[awaiting]] = await pool.execute(
+      `SELECT COUNT(*) AS count, COALESCE(SUM(reward_amount),0) AS amount
+         FROM user_reward_progress WHERE status = 'ACHIEVED'`
+    );
+
+    res.json({
+      rewards: rows.map(r => ({
+        ...r,
+        amount: parseFloat(r.amount) || 0,
+        plan_label: r.plan_name ? `${r.plan_name}${r.matrix_label ? ` (${r.matrix_label})` : ''}` : (r.description || 'Reward')
+      })),
+      page, limit,
+      total: Number(totals.total) || 0,
+      pages: Math.max(1, Math.ceil((Number(totals.total) || 0) / limit)),
+      totals: {
+        total_amount: parseFloat(totals.amount) || 0,
+        awaiting_count: Number(awaiting.count) || 0,
+        awaiting_amount: parseFloat(awaiting.amount) || 0
+      },
+      by_plan: byPlan.map(b => ({ ...b, count: Number(b.count) || 0, amount: parseFloat(b.amount) || 0 }))
+    });
+  } catch (error) {
+    if (error.code === 'ER_NO_SUCH_TABLE') {
+      return res.json({ rewards: [], page: 1, limit: 20, total: 0, pages: 1, totals: { total_amount: 0, awaiting_count: 0, awaiting_amount: 0 }, by_plan: [] });
+    }
+    console.error('Get reward income report error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // Withdrawal report — all withdrawal requests
 exports.getWithdrawalReport = async (req, res) => {
   try {
@@ -552,9 +647,12 @@ exports.getUserEarningsReport = async (req, res) => {
          COALESCE(w.repurchase_balance, 0) AS repurchase_balance,
          COALESCE(wd.withdrawn, 0) AS total_withdrawn,
          COALESCE(wd.pending, 0) AS pending_withdrawal,
-         COALESCE(ti.total,0) AS total_earnings
+         COALESCE(rw.total, 0) AS reward_income_total,
+         COALESCE(ti.total,0) + COALESCE(rw.total,0) AS total_earnings
        FROM users u
        LEFT JOIN (SELECT upline_id, SUM(amount) AS total FROM team_income_events GROUP BY upline_id) ti ON ti.upline_id = u.id
+       LEFT JOIN (SELECT user_id, SUM(amount) AS total FROM wallet_transactions
+                   WHERE type = 'reward' AND status = 'completed' GROUP BY user_id) rw ON rw.user_id = u.id
        LEFT JOIN wallets w ON w.user_id = u.id
        LEFT JOIN (SELECT user_id,
                    SUM(CASE WHEN status='processed' THEN amount ELSE 0 END) AS withdrawn,
@@ -574,6 +672,7 @@ exports.getUserEarningsReport = async (req, res) => {
         repurchase_balance: parseFloat(r.repurchase_balance) || 0,
         total_withdrawn: parseFloat(r.total_withdrawn) || 0,
         pending_withdrawal: parseFloat(r.pending_withdrawal) || 0,
+        reward_income_total: parseFloat(r.reward_income_total) || 0,
         total_earnings: parseFloat(r.total_earnings) || 0
       })),
       page, limit,
@@ -699,17 +798,11 @@ exports.getRankReport = async (req, res) => {
 
 // ==================== SETTINGS (income settings + audit) ====================
 
-// Get income settings + repurchase/auto-repurchase flags
+// Get income settings
 exports.getSettings = async (req, res) => {
   try {
     const income = await Settings.getIncomeSettings();
-    const repurchase = await Settings.get('repurchase_enabled');
-    res.json({
-      settings: {
-        ...income,
-        repurchase_enabled: repurchase === 'true'
-      }
-    });
+    res.json({ settings: income });
   } catch (error) {
     console.error('Get settings error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -730,9 +823,7 @@ exports.updateSettings = async (req, res) => {
     const allowed = [
       'qualification_levels_per_direct', 'qualification_max_levels',
       'withdrawal_min_amount', 'withdrawal_start_time', 'withdrawal_end_time', 'withdrawal_timezone',
-      'withdrawal_admin_charge_percent', 'repurchase_share_percent',
-      'auto_repurchase_enabled',
-      'repurchase_enabled'
+      'withdrawal_admin_charge_percent'
     ];
 
     const toUpdate = {};
@@ -755,14 +846,7 @@ exports.updateSettings = async (req, res) => {
       }
     }
 
-    const { repurchase_enabled, auto_repurchase_enabled, ...incomeKeys } = toUpdate;
-    await Settings.updateIncomeSettings(incomeKeys, connection);
-    if (repurchase_enabled !== undefined) {
-      await Settings.set('repurchase_enabled', repurchase_enabled, connection);
-    }
-    if (auto_repurchase_enabled !== undefined) {
-      await Settings.set('auto_repurchase_enabled', auto_repurchase_enabled, connection);
-    }
+    await Settings.updateIncomeSettings(toUpdate, connection);
 
     await connection.commit();
     res.json({ message: 'Settings updated successfully' });
@@ -1206,6 +1290,7 @@ exports.getUserFinancialReport = async (req, res) => {
         u.created_at,
         COALESCE(w.balance, 0) as wallet_balance,
         COALESCE(earnings.total_earned, 0) as total_earned,
+        COALESCE(earnings.reward_income, 0) as reward_income,
         COALESCE(pending.pending_amount, 0) as pending_income,
         0 as liability,
         COALESCE(directs.direct_count, 0) as direct_count,
@@ -1213,9 +1298,10 @@ exports.getUserFinancialReport = async (req, res) => {
       FROM users u
       LEFT JOIN wallets w ON u.id = w.user_id
       LEFT JOIN (
-        SELECT user_id, SUM(amount) as total_earned
+        SELECT user_id, SUM(amount) as total_earned,
+               SUM(CASE WHEN type = 'reward' THEN amount ELSE 0 END) as reward_income
         FROM wallet_transactions
-        WHERE type IN ('team_income') AND status = 'completed'
+        WHERE type IN ('team_income','reward') AND status = 'completed'
         GROUP BY user_id
       ) earnings ON u.id = earnings.user_id
       LEFT JOIN (
@@ -1254,12 +1340,14 @@ exports.getUserFinancialReport = async (req, res) => {
       SELECT
         COALESCE(SUM(w.balance), 0) as total_wallet_balance,
         COALESCE(SUM(earnings.total_earned), 0) as total_earned,
+        COALESCE(SUM(earnings.reward_income), 0) as total_reward_income,
         COALESCE(SUM(pending.pending_amount), 0) as total_pending
       FROM users u
       LEFT JOIN wallets w ON u.id = w.user_id
       LEFT JOIN (
-        SELECT user_id, SUM(amount) as total_earned
-        FROM wallet_transactions WHERE type IN ('team_income') AND status = 'completed'
+        SELECT user_id, SUM(amount) as total_earned,
+               SUM(CASE WHEN type = 'reward' THEN amount ELSE 0 END) as reward_income
+        FROM wallet_transactions WHERE type IN ('team_income','reward') AND status = 'completed'
         GROUP BY user_id
       ) earnings ON u.id = earnings.user_id
       LEFT JOIN (
@@ -1274,6 +1362,7 @@ exports.getUserFinancialReport = async (req, res) => {
         ...row,
         wallet_balance: parseFloat(row.wallet_balance) || 0,
         total_earned: parseFloat(row.total_earned) || 0,
+        reward_income: parseFloat(row.reward_income) || 0,
         pending_income: parseFloat(row.pending_income) || 0,
         liability: parseFloat(row.liability) || 0,
         direct_count: parseInt(row.direct_count) || 0,
@@ -1286,6 +1375,7 @@ exports.getUserFinancialReport = async (req, res) => {
       grand_totals: {
         total_wallet_balance: parseFloat(grandTotals[0].total_wallet_balance) || 0,
         total_earned: parseFloat(grandTotals[0].total_earned) || 0,
+        total_reward_income: parseFloat(grandTotals[0].total_reward_income) || 0,
         total_pending: parseFloat(grandTotals[0].total_pending) || 0
       }
     });
@@ -1323,14 +1413,14 @@ const USER_REPORT_JOIN = `
   LEFT JOIN (
     SELECT user_id, COALESCE(SUM(amount),0) AS total
     FROM wallet_transactions
-    WHERE type IN ('team_income','self_cashback','bonus','incentive','refund')
+    WHERE type IN ('team_income','reward','self_cashback','bonus','incentive','refund')
       AND status = 'completed'
     GROUP BY user_id
   ) inc ON inc.user_id = u.id
   LEFT JOIN (
     SELECT user_id,
-           COALESCE(SUM(CASE WHEN status != 'cancelled' THEN amount ELSE 0 END),0) AS amount,
-           COUNT(CASE WHEN status != 'cancelled' THEN 1 END) AS cnt
+           COALESCE(SUM(CASE WHEN status IN (${PAID_ORDER_STATUSES}) THEN amount ELSE 0 END),0) AS amount,
+           COUNT(CASE WHEN status IN (${PAID_ORDER_STATUSES}) THEN 1 END) AS cnt
     FROM orders GROUP BY user_id
   ) pur ON pur.user_id = u.id
   LEFT JOIN (
@@ -1461,15 +1551,17 @@ exports.getUserDetailReport = async (req, res) => {
           WHERE user_id = ? AND type = 'deposit' AND status = 'completed') AS total_deposits,
          (SELECT COALESCE(SUM(amount),0) FROM wallet_transactions
           WHERE user_id = ?
-            AND type IN ('team_income','self_cashback','bonus','incentive','refund')
+            AND type IN ('team_income','reward','self_cashback','bonus','incentive','refund')
             AND status = 'completed') AS total_income,
          (SELECT COALESCE(SUM(amount),0) FROM wallet_transactions
           WHERE user_id = ? AND type = 'team_income' AND status = 'completed') AS team_income_total,
          (SELECT COALESCE(SUM(amount),0) FROM wallet_transactions
+          WHERE user_id = ? AND type = 'reward' AND status = 'completed') AS reward_income_total,
+         (SELECT COALESCE(SUM(amount),0) FROM wallet_transactions
           WHERE user_id = ? AND type = 'self_cashback' AND status = 'completed') AS cashback_total,
-         (SELECT COALESCE(SUM(CASE WHEN status != 'cancelled' THEN amount ELSE 0 END),0)
+         (SELECT COALESCE(SUM(CASE WHEN status IN (${PAID_ORDER_STATUSES}) THEN amount ELSE 0 END),0)
           FROM orders WHERE user_id = ?) AS total_purchases,
-         (SELECT COUNT(*) FROM orders WHERE user_id = ? AND status != 'cancelled') AS order_count,
+         (SELECT COUNT(*) FROM orders WHERE user_id = ? AND status IN (${PAID_ORDER_STATUSES})) AS order_count,
          (SELECT COALESCE(SUM(CASE WHEN status = 'processed' THEN payout_amount ELSE 0 END),0)
           FROM withdrawal_requests WHERE user_id = ?) AS total_withdrawn,
          (SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests
@@ -1477,7 +1569,7 @@ exports.getUserDetailReport = async (req, res) => {
          (SELECT COUNT(*) FROM users WHERE referred_by = ?) AS direct_count,
          (SELECT COUNT(*) FROM users
           WHERE referred_by = ? AND has_active_package = 1) AS active_directs`,
-      [userId, userId, userId, userId, userId, userId, userId, userId, userId, userId]
+      [userId, userId, userId, userId, userId, userId, userId, userId, userId, userId, userId]
     );
 
     // Complete wallet ledger — every transaction, newest first
@@ -1565,6 +1657,7 @@ exports.getUserDetailReport = async (req, res) => {
         total_deposits: parseFloat(summary.total_deposits) || 0,
         total_income: parseFloat(summary.total_income) || 0,
         team_income_total: parseFloat(summary.team_income_total) || 0,
+        reward_income_total: parseFloat(summary.reward_income_total) || 0,
         cashback_total: parseFloat(summary.cashback_total) || 0,
         total_purchases: parseFloat(summary.total_purchases) || 0,
         order_count: parseInt(summary.order_count) || 0,

@@ -108,9 +108,26 @@ const AdminOrders = () => {
       )
     },
     {
+      key: 'user_address',
+      label: 'Address',
+      render: (value, row) => (value || row.user_state || row.user_pincode) ? (
+        <div style={{ maxWidth: '220px', whiteSpace: 'normal' }}>
+          <span>{value || '—'}</span>
+          {row.user_state && <span className="block text-muted text-sm">{row.user_state}</span>}
+        </div>
+      ) : (
+        <span className="text-muted">—</span>
+      )
+    },
+    {
+      key: 'user_pincode',
+      label: 'Zipcode',
+      render: (value) => value || <span className="text-muted">—</span>
+    },
+    {
       key: 'payment_type',
       label: 'Payment',
-      render: (value) => <span className="text-capitalize">{value}</span>
+      render: (value) => <span className="text-capitalize">{value === 'qr' ? 'QR / UPI' : value}</span>
     },
     {
       key: 'status',
@@ -154,6 +171,10 @@ const AdminOrders = () => {
     { key: 'order_number', label: 'Order ID' },
     { key: 'user_name', label: 'Customer Name' },
     { key: 'user_email', label: 'Customer Email' },
+    { key: 'user_mobile', label: 'Mobile' },
+    { key: 'user_address', label: 'Address' },
+    { key: 'user_state', label: 'State' },
+    { key: 'user_pincode', label: 'Zipcode' },
     { key: 'product_name', label: 'Product' },
     { key: 'design_name', label: 'Design' },
     { key: 'amount', label: 'Amount' },

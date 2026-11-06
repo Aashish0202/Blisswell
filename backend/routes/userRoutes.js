@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
+const OfferBanner = require('../models/OfferBanner');
 const { verifyToken } = require('../middleware/auth');
 const { uploadProfileImage } = require('../middleware/upload');
 
@@ -9,6 +10,17 @@ router.use(verifyToken);
 
 // Dashboard
 router.get('/dashboard', userController.getDashboard);
+
+// Offer banners currently within their scheduled display window
+router.get('/offer-banners', async (req, res) => {
+  try {
+    const banners = await OfferBanner.getCurrent();
+    res.json({ banners });
+  } catch (error) {
+    console.error('Get current offer banners error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
 
 // Profile
 router.get('/profile', userController.getProfile);

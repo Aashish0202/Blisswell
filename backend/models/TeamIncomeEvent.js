@@ -37,7 +37,7 @@ const TeamIncomeEvent = {
     }
     params.push(limit, offset);
     const [rows] = await conn.execute(
-      `SELECT tie.*, u.name as purchaser_name, u.email as purchaser_email,
+      `SELECT tie.*, u.name as purchaser_name,
               o.order_source
        FROM team_income_events tie
        JOIN users u ON tie.purchaser_id = u.id

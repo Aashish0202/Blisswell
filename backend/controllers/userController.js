@@ -12,27 +12,6 @@ const teamIncomeService = require('../services/teamIncomeService');
 const fs = require('fs');
 const path = require('path');
 
-// Upgrade progress for the logged-in user: the next higher-priced active
-// product above their current one, and how much is still needed.
-async function getUpgradeInfo(userId) {
-  const user = await User.findById(userId);
-  if (!user || !user.has_active_package || !user.current_product_id) return null;
-  const next = await Product.getNextHigherProduct(user.current_product_id);
-  if (!next) return { at_top_rank: true };
-  const repurchaseBalance = parseFloat((await Wallet.getByUserId(userId))?.repurchase_balance) || 0;
-  const nextPrice = parseFloat(next.price);
-  return {
-    next_product_id: next.id,
-    next_rank_name: next.rank_name,
-    next_price: nextPrice,
-    repurchase_balance: repurchaseBalance,
-    shortfall: parseFloat(Math.max(0, nextPrice - repurchaseBalance).toFixed(2)),
-    progress: Math.min(100, parseFloat(((repurchaseBalance / nextPrice) * 100).toFixed(1)))
-  };
-}
-// Exposed so the purchase endpoints can attach next-upgrade info to the
-// purchase-success response (drives the post-purchase popup).
-exports.getUpgradeInfo = getUpgradeInfo;
 
 // Get user dashboard data (§30 earnings + selfCashback + teamIncome blocks)
 exports.getDashboard = async (req, res) => {
@@ -46,8 +25,9 @@ exports.getDashboard = async (req, res) => {
 
     const wallet = await Wallet.getByUserId(userId) || { balance: 0, earnings_balance: 0 };
 
-    // Income total (level income — manual purchases + auto-repurchase upgrades)
+    // Income total (level income from downline purchases)
     const teamIncomeTotal = await TeamIncomeEvent.sumByUpline(userId);
+    const rewardIncomeTotal = await WalletTransaction.sumRewards(userId);
 
     const [wdRows] = await pool.execute(
       `SELECT
@@ -59,11 +39,14 @@ exports.getDashboard = async (req, res) => {
     const totalWithdrawn = parseFloat(wdRows[0].withdrawn) || 0;
     const pendingWithdrawal = parseFloat(wdRows[0].pending) || 0;
 
-    const totalEarnings = parseFloat(teamIncomeTotal.toFixed(2));
+    const totalEarnings = parseFloat((teamIncomeTotal + rewardIncomeTotal).toFixed(2));
     const availableForWithdrawal = parseFloat(wallet.earnings_balance) || 0;
 
     const totalReferrals = await User.countReferrals(userId);
     const activeReferrals = await User.countActiveReferrals(userId);
+    // Whole team down to the admin-set Max Levels (directs + their downline)
+    const { maxLevels } = await Settings.getQualificationSettings();
+    const team = await User.countTeam(userId, maxLevels);
 
     let recentOrders = [];
     try {
@@ -74,7 +57,14 @@ exports.getDashboard = async (req, res) => {
 
     // New income blocks
     const teamIncome = await teamIncomeService.getUplineEarningsSummary(userId);
-    const upgrade = await getUpgradeInfo(userId);
+    // Latest QR payment awaiting admin review (drives "activation pending")
+    const [qrRows] = await pool.execute(
+      `SELECT pr.id, pr.amount, pr.utr, pr.created_at, p.name AS product_name
+         FROM payment_requests pr JOIN products p ON p.id = pr.product_id
+        WHERE pr.user_id = ? AND pr.status = 'pending'
+        ORDER BY pr.id DESC LIMIT 1`,
+      [userId]
+    );
 
     res.json({
       user: {
@@ -91,23 +81,24 @@ exports.getDashboard = async (req, res) => {
       },
       wallet: {
         balance: wallet?.balance || 0,
-        earnings_balance: availableForWithdrawal,
-        repurchase_balance: parseFloat(wallet?.repurchase_balance) || 0
+        earnings_balance: availableForWithdrawal
       },
       referrals: {
         total: totalReferrals,
-        active: activeReferrals
+        active: activeReferrals,
+        team_total: team.total,
+        team_active: team.active
       },
       earnings: {
         totalEarnings,
         teamIncomeTotal: parseFloat(teamIncomeTotal.toFixed(2)),
+        rewardIncomeTotal,
         availableForWithdrawal,
         totalWithdrawn,
-        pendingWithdrawal,
-        repurchaseBalance: parseFloat(wallet?.repurchase_balance) || 0
+        pendingWithdrawal
       },
       teamIncome,
-      upgrade,
+      pendingQrPayment: qrRows[0] || null,
       recentOrders: (recentOrders || []).map(o => ({
         id: o.id,
         product_name: o.product_name,
@@ -343,8 +334,7 @@ exports.getReferrals = async (req, res) => {
       referrals: referrals.map(r => ({
         id: r.id,
         name: r.name,
-        email: r.email,
-        mobile: r.mobile,
+        // email/mobile deliberately omitted — team members' contact details are private
         has_active_package: r.has_active_package,
         direct_business: parseFloat(r.total_purchase || 0),
         bonus_received: parseFloat(r.bonus_received || 0),
@@ -362,7 +352,7 @@ exports.getReferrals = async (req, res) => {
 };
 
 // Full 8-level downline tree, with level filter + search across
-// name/email/mobile/referral_code. Used by the Team page's "My Network" view.
+// name/referral_code (not email/mobile — those are private). Used by the Team page's "My Network" view.
 exports.getDownlineTeam = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -370,15 +360,19 @@ exports.getDownlineTeam = async (req, res) => {
     const level = req.query.level ? parseInt(req.query.level, 10) : null;
     const search = (req.query.search || '').trim();
 
-    const { rows, total, levelCounts } = await User.getDownline(req.user.id, { page, limit, level, search });
+    // Users only see their team down to the admin-set Max Levels.
+    const { maxLevels } = await Settings.getQualificationSettings();
+    const { rows, total, levelCounts } = await User.getDownline(req.user.id, { page, limit, level, search, maxLevels });
 
     res.json({
+      maxLevels: Math.min(10, Math.max(1, maxLevels)),
       members: rows.map(r => ({
         id: r.id,
         name: r.name,
-        email: r.email,
-        mobile: r.mobile,
+        // email/mobile deliberately omitted — team members' contact details are private
         referral_code: r.referral_code,
+        sponsor_code: r.sponsor_code,
+        sponsor_name: r.sponsor_name,
         has_active_package: r.has_active_package,
         rank_name: r.rank_name,
         level: r.level,
@@ -403,7 +397,8 @@ exports.getDownlineTeam = async (req, res) => {
 // Aggregated referral stats (correct across ALL referrals, not just current page)
 exports.getReferralSummary = async (req, res) => {
   try {
-    const summary = await User.getReferralSummary(req.user.id);
+    const { maxLevels } = await Settings.getQualificationSettings();
+    const summary = await User.getReferralSummary(req.user.id, maxLevels);
     res.json({ summary });
   } catch (error) {
     console.error('Get referral summary error:', error);
@@ -455,6 +450,7 @@ exports.getEarningsSummary = async (req, res) => {
     const wallet = await Wallet.getByUserId(userId) || { earnings_balance: 0 };
 
     const teamIncomeTotal = await TeamIncomeEvent.sumByUpline(userId);
+    const rewardIncomeTotal = await WalletTransaction.sumRewards(userId);
 
     const [wdRows] = await pool.execute(
       `SELECT
@@ -469,12 +465,12 @@ exports.getEarningsSummary = async (req, res) => {
 
     res.json({
       earnings: {
-        totalEarnings: parseFloat(teamIncomeTotal.toFixed(2)),
+        totalEarnings: parseFloat((teamIncomeTotal + rewardIncomeTotal).toFixed(2)),
         teamIncomeTotal: parseFloat(teamIncomeTotal.toFixed(2)),
+        rewardIncomeTotal,
         availableForWithdrawal,
         totalWithdrawn,
-        pendingWithdrawal,
-        repurchaseBalance: parseFloat(wallet.repurchase_balance) || 0
+        pendingWithdrawal
       }
     });
   } catch (error) {
@@ -490,6 +486,7 @@ exports.getEarningsBreakdown = async (req, res) => {
     const wallet = await Wallet.getByUserId(userId) || { earnings_balance: 0 };
 
     const teamIncomeTotal = await TeamIncomeEvent.sumByUpline(userId);
+    const rewardIncomeTotal = await WalletTransaction.sumRewards(userId);
 
     const [wdRows] = await pool.execute(
       `SELECT
@@ -503,19 +500,17 @@ exports.getEarningsBreakdown = async (req, res) => {
     const availableForWithdrawal = parseFloat(wallet.earnings_balance) || 0;
 
     const teamIncome = await teamIncomeService.getUplineEarningsSummary(userId);
-    const upgrade = await getUpgradeInfo(userId);
 
     res.json({
       earnings: {
-        totalEarnings: parseFloat(teamIncomeTotal.toFixed(2)),
+        totalEarnings: parseFloat((teamIncomeTotal + rewardIncomeTotal).toFixed(2)),
         teamIncomeTotal: parseFloat(teamIncomeTotal.toFixed(2)),
+        rewardIncomeTotal,
         availableForWithdrawal,
         totalWithdrawn,
-        pendingWithdrawal,
-        repurchaseBalance: parseFloat(wallet.repurchase_balance) || 0
+        pendingWithdrawal
       },
-      teamIncome,
-      upgrade
+      teamIncome
     });
   } catch (error) {
     console.error('Get earnings breakdown error:', error);

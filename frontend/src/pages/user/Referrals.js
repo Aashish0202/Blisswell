@@ -6,7 +6,6 @@ import DashboardLayout from '../../components/DashboardLayout';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
 import Pagination from '../../components/Pagination';
-import { rankBadgeClass } from '../../utils/rankTheme';
 
 const Referrals = () => {
   const [referrals, setReferrals] = useState([]);
@@ -18,10 +17,10 @@ const Referrals = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState({ total_referrals: 0, active_referrals: 0, total_direct_business: 0, total_team_business: 0, total_team_income: 0 });
+  const [summary, setSummary] = useState({ total_referrals: 0, active_referrals: 0, team_total: 0, team_active: 0, total_direct_business: 0, total_team_business: 0, total_team_income: 0 });
   const { user } = useSelector((state) => state.auth);
 
-  // 10-level downline ("My Network") — search + level filter
+  // Downline ("My Network"), limited to the admin Max Levels — search + level filter
   const [downline, setDownline] = useState([]);
   const [downlineLoading, setDownlineLoading] = useState(true);
   const [downlinePage, setDownlinePage] = useState(1);
@@ -31,6 +30,8 @@ const Referrals = () => {
   const [levelFilter, setLevelFilter] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [downlineSearch, setDownlineSearch] = useState('');
+  // Visible network depth = admin "Max Levels" setting (1-10), sent by the API
+  const [maxLevels, setMaxLevels] = useState(10);
 
   useEffect(() => {
     fetchReferrals();
@@ -54,6 +55,7 @@ const Referrals = () => {
       setDownlineTotal(response.data.total || 0);
       setDownlineTotalPages(response.data.totalPages || 1);
       setLevelCounts(response.data.levelCounts || []);
+      if (response.data.maxLevels) setMaxLevels(response.data.maxLevels);
     } catch (error) {
       toast.error('Failed to load network');
     } finally {
@@ -217,15 +219,15 @@ const Referrals = () => {
         <div className="stats-grid">
           <div className="stat-card teal">
             <div className="stat-icon">👥</div>
-            <div className="stat-label">Total Referrals</div>
-            <div className="stat-value">{summary.total_referrals}</div>
-            <div className="stat-subtext">People you've referred</div>
+            <div className="stat-label">Total Team</div>
+            <div className="stat-value">{summary.team_total || 0}</div>
+            <div className="stat-subtext">All {maxLevels} levels · {summary.total_referrals} direct</div>
           </div>
           <div className="stat-card success">
             <div className="stat-icon">✅</div>
-            <div className="stat-label">Active Referrals</div>
-            <div className="stat-value">{activeReferrals}</div>
-            <div className="stat-subtext">With active package</div>
+            <div className="stat-label">Active Team</div>
+            <div className="stat-value">{summary.team_active || 0}</div>
+            <div className="stat-subtext">With active package · {activeReferrals} direct</div>
           </div>
           <div className="stat-card primary">
             <div className="stat-icon">💼</div>
@@ -237,7 +239,7 @@ const Referrals = () => {
             <div className="stat-icon">🌐</div>
             <div className="stat-label">Team Business</div>
             <div className="stat-value">₹{totalTeamBusiness.toLocaleString()}</div>
-            <div className="stat-subtext">Total purchases across all 10 levels</div>
+            <div className="stat-subtext">Total purchases across all {maxLevels} levels</div>
           </div>
           <div className="stat-card gold">
             <div className="stat-icon">👥</div>
@@ -271,7 +273,7 @@ const Referrals = () => {
               <div className="step-number">3</div>
               <div className="step-content">
                 <h4>Earn Team Income</h4>
-                <p>Earn Team Income for each active referral who purchases — 10 levels per rank</p>
+                <p>Earn Team Income when anyone in your team purchases — up to {maxLevels} levels</p>
               </div>
             </div>
           </div>
@@ -282,7 +284,7 @@ const Referrals = () => {
           <div className="card-header">
             <h3 className="card-title">Your Referrals</h3>
             {summary.total_referrals > 0 && (
-              <span className="badge badge-neutral">{summary.total_referrals} Members</span>
+              <span className="badge badge-neutral">{summary.total_referrals} Direct</span>
             )}
           </div>
           {total > 0 ? (
@@ -291,7 +293,6 @@ const Referrals = () => {
                 <thead>
                   <tr>
                     <th>Name</th>
-                    <th>Contact</th>
                     <th>Direct Business</th>
                     <th>Qualified</th>
                     <th>Status</th>
@@ -308,12 +309,6 @@ const Referrals = () => {
                             {ref.name?.charAt(0).toUpperCase()}
                           </div>
                           <span className="member-name">{ref.name}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="contact-info">
-                          <span className="contact-email">{ref.email}</span>
-                          <span className="contact-mobile">{ref.mobile}</span>
                         </div>
                       </td>
                       <td>
@@ -368,10 +363,10 @@ const Referrals = () => {
           )}
         </div>
 
-        {/* 10-Level Network */}
+        {/* Network (admin-limited levels) */}
         <div className="card">
           <div className="card-header">
-            <h3 className="card-title">🌐 My Network (10 Levels)</h3>
+            <h3 className="card-title">🌐 My Network ({maxLevels} Levels)</h3>
             {downlineTotal > 0 && (
               <span className="badge badge-neutral">{downlineTotal} Members</span>
             )}
@@ -405,7 +400,7 @@ const Referrals = () => {
             <input
               type="text"
               className="form-input"
-              placeholder="Search by name, email, mobile, or referral code..."
+              placeholder="Search by name or referral code..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
             />
@@ -425,9 +420,8 @@ const Referrals = () => {
                     <tr>
                       <th>Level</th>
                       <th>Name</th>
-                      <th>Contact</th>
                       <th>Referral Code</th>
-                      <th>Rank</th>
+                      <th>Sponsor ID</th>
                       <th>Status</th>
                       <th>Joined</th>
                     </tr>
@@ -442,14 +436,8 @@ const Referrals = () => {
                             <span className="member-name">{m.name}</span>
                           </div>
                         </td>
-                        <td>
-                          <div className="contact-info">
-                            <span className="contact-email">{m.email}</span>
-                            <span className="contact-mobile">{m.mobile}</span>
-                          </div>
-                        </td>
                         <td className="font-mono">{m.referral_code}</td>
-                        <td>{m.rank_name ? <span className={rankBadgeClass(m.rank_name)}>🏆 {m.rank_name}</span> : <span className="text-muted">—</span>}</td>
+                        <td className="font-mono" title={m.sponsor_name || ''}>{m.sponsor_code || '—'}</td>
                         <td>
                           <span className={`badge badge-${m.has_active_package ? 'success' : 'warning'}`}>
                             {m.has_active_package ? '✓ Active' : '⏳ Inactive'}
@@ -472,7 +460,7 @@ const Referrals = () => {
             <EmptyState
               icon="🌐"
               title={downlineSearch || levelFilter ? 'No matches found' : 'No network yet'}
-              description={downlineSearch || levelFilter ? 'Try a different search term or level.' : 'As your referrals build their own teams, your full 10-level network will appear here.'}
+              description={downlineSearch || levelFilter ? 'Try a different search term or level.' : `As your referrals build their own teams, your network (up to ${maxLevels} levels) will appear here.`}
             />
           )}
         </div>

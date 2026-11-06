@@ -13,7 +13,7 @@ const Product = require('../models/Product');
 //     condition. Every active upline earns all 10 levels from their team's
 //     purchases; there is no qualified-directs level-unlock requirement.
 const teamIncomeService = {
-  // Called from orderController (manual purchases) and autoRepurchaseService
+  // Called from orderController (manual purchases) and qrPaymentService (QR approvals)
   // (upgrades) inside their purchase transactions. `product` is the
   // purchaser's product row (level_income already parsed to an array).
   // Idempotent via reference_key UNIQUE on team_income_events + wallet_transactions.
@@ -90,6 +90,10 @@ const teamIncomeService = {
     const totals = await TeamIncomeEvent.levelTotalsByUpline(userId, conn);
     const sourceTotals = await TeamIncomeEvent.sourceTotalsByUpline(userId, conn);
     const ranks = await Product.getActiveRanks(conn);
+    // Users see the level table only down to the admin "Max Levels" (1..10),
+    // matching their visible team. totalEarned still counts all real income.
+    const { maxLevels: rawMax } = await Settings.getQualificationSettings(conn);
+    const maxLevels = Math.min(10, Math.max(1, rawMax));
 
     let totalEarned = 0;
     for (const lvl of Object.keys(totals)) {
@@ -98,6 +102,7 @@ const teamIncomeService = {
 
     return {
       totalEarned: parseFloat(totalEarned.toFixed(2)),
+      maxLevels,
       // Income split by trigger: downline manual purchases vs the
       // auto-repurchase engine's rank upgrades.
       earnedFromPurchases: parseFloat(sourceTotals.purchase.toFixed(2)),
@@ -107,7 +112,7 @@ const teamIncomeService = {
         rank_name: r.rank_name,
         price: parseFloat(r.price),
         is_current: false, // set by callers if they know the user's current product
-        levels: (r.level_income || []).map((amount, idx) => {
+        levels: (r.level_income || []).slice(0, maxLevels).map((amount, idx) => {
           const level = idx + 1;
           const earned = totals[level]?.earned || 0;
           return {

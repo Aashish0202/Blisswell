@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
-import { orderAPI } from '../utils/api';
+import { orderAPI, paymentAPI } from '../utils/api';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
@@ -20,33 +20,55 @@ const getYouTubeId = (url) => {
   return null;
 };
 
-const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
+// initialDesignIdx: the design the buyer already picked on the product card.
+// When set, that design is locked in here so it isn't chosen twice.
+const PurchaseModal = ({ isOpen, onClose, product, onSuccess, initialDesignIdx = null }) => {
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState('confirm'); // 'confirm' | 'processing' | 'success' | 'failed' | 'cancelled'
+  const [step, setStep] = useState('confirm'); // 'confirm' | 'qr' | 'qr-submitted' | 'processing' | 'success' | 'failed' | 'cancelled'
   const [razorpayLoaded, setRazorpayLoaded] = useState(false);
   const [, setCurrentOrderId] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
-  const [selectedDesignIdx, setSelectedDesignIdx] = useState(0);
+  const [selectedDesignIdx, setSelectedDesignIdx] = useState(null);
+  const [designLocked, setDesignLocked] = useState(false);
   const [designImageIdx, setDesignImageIdx] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [designVideoOpen, setDesignVideoOpen] = useState(false);
-  // One-time purchase rule + post-purchase next-upgrade popup
+  // One-time purchase rule
   const [alreadyOwned, setAlreadyOwned] = useState(false);
-  const [nextUpgrade, setNextUpgrade] = useState(null);
+  // Payment methods the admin has switched on, and the buyer's choice
+  const [payConfig, setPayConfig] = useState(null);
+  const [payMethod, setPayMethod] = useState('razorpay');
+  const [pendingQr, setPendingQr] = useState(null);
+  const [qrUtr, setQrUtr] = useState('');
+  const [qrFile, setQrFile] = useState(null);
+  const [qrPreview, setQrPreview] = useState('');
+  const [qrSubmitting, setQrSubmitting] = useState(false);
 
   const designs = (product && Array.isArray(product.designs)) ? product.designs : [];
-  const selectedDesign = designs[selectedDesignIdx] || null;
+  const selectedDesign = selectedDesignIdx !== null ? (designs[selectedDesignIdx] || null) : null;
+  // Out-of-stock designs stay visible but can't be bought; if every design is
+  // out of stock the product can't be purchased at all.
+  const allDesignsOutOfStock = designs.length > 0 && designs.every(d => d.out_of_stock);
 
   // Reset the design selection whenever the modal opens or the product
-  // changes, so a stale selection never leaks between purchases. Also gate
-  // the confirm step for users who already own a package (one-time rule).
+  // changes, so a stale selection never leaks between purchases. A design
+  // picked on the product card carries over and is locked. Also gate the
+  // confirm step for users who already own a package (one-time rule).
   useEffect(() => {
     if (isOpen) {
-      setSelectedDesignIdx(0);
+      // An out-of-stock design picked on the card is not carried over — the
+      // buyer chooses another one here instead.
+      const carried = initialDesignIdx !== null && designs[initialDesignIdx] && !designs[initialDesignIdx].out_of_stock
+        ? initialDesignIdx
+        : null;
+      setSelectedDesignIdx(carried);
+      setDesignLocked(carried !== null);
       setDesignImageIdx(0);
       setLightboxOpen(false);
       setDesignVideoOpen(false);
-      setNextUpgrade(null);
+      setQrUtr('');
+      setQrFile(null);
+      setPendingQr(null);
       try {
         const u = JSON.parse(localStorage.getItem('user') || 'null');
         setAlreadyOwned(!!(u && u.has_active_package));
@@ -54,9 +76,37 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
         setAlreadyOwned(false);
       }
     }
-  }, [isOpen, product?.id]);
+  }, [isOpen, product?.id, initialDesignIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load enabled payment methods + any QR payment still awaiting approval
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    let cancelled = false;
+    Promise.all([
+      paymentAPI.getConfig(),
+      paymentAPI.getMyQrPayments().catch(() => ({ data: { requests: [] } }))
+    ]).then(([cfg, mine]) => {
+      if (cancelled) return;
+      const config = cfg.data;
+      setPayConfig(config);
+      setPayMethod(config.razorpay.enabled ? 'razorpay' : 'qr');
+      setPendingQr((mine.data.requests || []).find(r => r.status === 'pending') || null);
+    }).catch(() => {
+      if (!cancelled) setPayConfig({ razorpay: { enabled: true }, qr: { enabled: false } });
+    });
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
+  // Local preview of the attached payment screenshot
+  useEffect(() => {
+    if (!qrFile) { setQrPreview(''); return undefined; }
+    const url = URL.createObjectURL(qrFile);
+    setQrPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [qrFile]);
 
   const selectDesign = (idx) => {
+    if (designs[idx] && designs[idx].out_of_stock) return;
     setSelectedDesignIdx(idx);
     setDesignImageIdx(0);
     setDesignVideoOpen(false);
@@ -123,6 +173,16 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
       return;
     }
 
+    if (designs.length > 0 && !selectedDesign) {
+      toast.error('Please select a design before purchasing');
+      return;
+    }
+
+    if (selectedDesign && selectedDesign.out_of_stock) {
+      toast.error(`${selectedDesign.name} is out of stock. Please select another design.`);
+      return;
+    }
+
     if (!razorpayLoaded) {
       console.error('Razorpay not loaded yet');
       toast.error('Payment gateway is loading. Please try again in a moment.');
@@ -168,7 +228,6 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
             });
 
             console.log('Payment verified:', verifyResponse.data);
-            setNextUpgrade(verifyResponse.data.nextUpgrade || null);
             setStep('success');
             toast.success('Purchase successful!');
 
@@ -183,15 +242,11 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
               }
             } catch (e) { /* ignore */ }
 
-            // Redirect to orders page after 2 seconds — unless the
-            // next-upgrade popup is shown, which holds until dismissed.
-            const upgrade = verifyResponse.data.nextUpgrade;
-            if (!upgrade || upgrade.at_top_rank) {
-              setTimeout(() => {
-                onSuccess && onSuccess(verifyResponse.data);
-                onClose();
-              }, 2000);
-            }
+            // Redirect to orders page after 2 seconds
+            setTimeout(() => {
+              onSuccess && onSuccess(verifyResponse.data);
+              onClose();
+            }, 2000);
 
           } catch (verifyError) {
             console.error('Payment verification failed:', verifyError);
@@ -242,6 +297,61 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
     }
   };
 
+  // Pay button: Razorpay opens checkout; QR moves to the scan-and-upload step
+  const handlePay = () => {
+    if (payMethod === 'qr') {
+      if (designs.length > 0 && !selectedDesign) {
+        toast.error('Please select a design before purchasing');
+        return;
+      }
+      setErrorMessage('');
+      setStep('qr');
+      return;
+    }
+    handlePurchase();
+  };
+
+  const handleQrFile = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) { setQrFile(null); return; }
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
+      toast.error('Please attach a JPG, PNG or WEBP screenshot');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Screenshot must be under 5MB');
+      e.target.value = '';
+      return;
+    }
+    setQrFile(file);
+  };
+
+  const handleQrSubmit = async () => {
+    const utr = qrUtr.trim().replace(/\s+/g, '');
+    if (!qrFile) { toast.error('Please attach the payment screenshot'); return; }
+    if (!/^[A-Za-z0-9]{6,30}$/.test(utr)) {
+      toast.error('Enter a valid transaction ID / UTR');
+      return;
+    }
+    const formData = new FormData();
+    formData.append('product_id', product.id);
+    if (selectedDesign) formData.append('design_name', selectedDesign.name);
+    formData.append('utr', utr);
+    formData.append('screenshot', qrFile);
+
+    setQrSubmitting(true);
+    try {
+      await paymentAPI.submitQrPayment(formData);
+      setStep('qr-submitted');
+      toast.success('Payment submitted for verification');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to submit payment. Please try again.');
+    } finally {
+      setQrSubmitting(false);
+    }
+  };
+
   const handleClose = () => {
     setStep('confirm');
     setErrorMessage('');
@@ -257,20 +367,52 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
     return parseFloat(price).toLocaleString('en-IN');
   };
 
-  // Resolve the image shown in the preview: the selected design's image if a
-  // design with images is picked, otherwise the product's default image.
-  const designImages = selectedDesign ? (selectedDesign.images || []) : [];
+  // Gallery images: the main product images until a design (with images) is
+  // picked, then only that design's images.
+  const productImages = (product.images && product.images.length > 0)
+    ? product.images
+    : (product.image ? [product.image] : []);
+  const designImages = (selectedDesign && selectedDesign.images && selectedDesign.images.length > 0)
+    ? selectedDesign.images
+    : productImages;
+  const galleryLabel = selectedDesign ? selectedDesign.name : product.name;
   const previewImage = designImages[designImageIdx] || designImages[0] || product.image;
+  const needsDesign = designs.length > 0 && (!selectedDesign || selectedDesign.out_of_stock);
   const resolveImageUrl = (img) => {
     if (!img) return null;
     return img.startsWith('http') ? img : `${API_URL.replace('/api', '')}${img}`;
   };
+  // Only the main package can be bought; others are display-only
+  const notPurchasable = !product.is_purchasable;
+  const razorpayOn = !!(payConfig && payConfig.razorpay.enabled);
+  const qrOn = !!(payConfig && payConfig.qr.enabled);
+  const noPaymentMethod = payConfig && !razorpayOn && !qrOn;
 
   return (
     <>
     <div className="modal-overlay" onClick={handleClose}>
       <div className="modal-content purchase-modal" onClick={(e) => e.stopPropagation()}>
-        {step === 'confirm' && alreadyOwned && (
+        {step === 'confirm' && notPurchasable && (
+          <>
+            <div className="modal-header">
+              <h2>{product.name}</h2>
+              <button className="close-btn" onClick={handleClose}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="owned-notice">
+                <div className="owned-notice-icon">🔁</div>
+                <h3>This is a repurchase product</h3>
+                <p>Buy as product for repurchase — <strong>Repurchase coming soon.</strong></p>
+                <p className="owned-notice-sub">You'll be able to purchase this product once repurchase opens.</p>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={handleClose}>Got it</button>
+            </div>
+          </>
+        )}
+
+        {step === 'confirm' && !notPurchasable && alreadyOwned && (
           <>
             <div className="modal-header">
               <h2>Package Already Owned</h2>
@@ -280,14 +422,8 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
               <div className="owned-notice">
                 <div className="owned-notice-icon">🔒</div>
                 <h3>One-time purchase only</h3>
-                <p>
-                  You already own a package, so you can't purchase again. Your next higher
-                  rank is bought <strong>automatically</strong> from your Repurchase Wallet
-                  as soon as the balance reaches that rank's price.
-                </p>
-                <p className="owned-notice-sub">
-                  Every withdrawal adds 20% to your Repurchase Wallet to fund the upgrade.
-                </p>
+                <p>You have already purchased this package, so you can't purchase it again.</p>
+                <p className="owned-notice-sub">Repurchase is coming soon.</p>
               </div>
             </div>
             <div className="modal-footer">
@@ -296,7 +432,30 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
           </>
         )}
 
-        {step === 'confirm' && !alreadyOwned && (
+        {step === 'confirm' && !notPurchasable && !alreadyOwned && pendingQr && (
+          <>
+            <div className="modal-header">
+              <h2>Payment Under Review</h2>
+              <button className="close-btn" onClick={handleClose}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="owned-notice">
+                <div className="owned-notice-icon">⏳</div>
+                <h3>Awaiting admin approval</h3>
+                <p>
+                  Your QR payment of <strong>₹{formatPrice(pendingQr.amount)}</strong> (UTR {pendingQr.utr}) is being verified.
+                  Your order will be confirmed once it is approved.
+                </p>
+                <p className="owned-notice-sub">You'll get an email as soon as it's reviewed.</p>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={handleClose}>Got it</button>
+            </div>
+          </>
+        )}
+
+        {step === 'confirm' && !notPurchasable && !alreadyOwned && !pendingQr && (
           <>
             <div className="modal-header">
               <h2>Confirm Purchase</h2>
@@ -334,18 +493,23 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
 
               {designs.length > 0 && (
                 <div className="design-selector">
-                  <div className="design-tabs">
-                    {designs.map((d, idx) => (
-                      <button
-                        key={`${d.name}-${idx}`}
-                        type="button"
-                        className={`design-tab${idx === selectedDesignIdx ? ' active' : ''}`}
-                        onClick={() => selectDesign(idx)}
-                      >
-                        {d.name}
-                      </button>
-                    ))}
-                  </div>
+                  {!designLocked && (
+                    <div className="design-tabs">
+                      {designs.map((d, idx) => (
+                        <button
+                          key={`${d.name}-${idx}`}
+                          type="button"
+                          className={`design-tab${idx === selectedDesignIdx ? ' active' : ''}${d.out_of_stock ? ' out-of-stock' : ''}`}
+                          onClick={() => selectDesign(idx)}
+                          disabled={d.out_of_stock}
+                          title={d.out_of_stock ? 'This design is out of stock' : undefined}
+                        >
+                          {d.name}
+                          {d.out_of_stock && <span className="design-tab-oos">Out of stock</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   {designImages.length > 0 && (
                     <>
@@ -356,7 +520,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
                       >
                         <img
                           src={resolveImageUrl(designImages[designImageIdx] || designImages[0])}
-                          alt={`${product.name} - ${selectedDesign.name}`}
+                          alt={selectedDesign ? `${product.name} - ${selectedDesign.name}` : product.name}
                         />
                         <span className="design-zoom-hint">&#128269; Click to enlarge</span>
                       </div>
@@ -369,7 +533,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
                               className={`design-thumb${idx === designImageIdx ? ' active' : ''}`}
                               onClick={() => setDesignImageIdx(idx)}
                             >
-                              <img src={resolveImageUrl(img)} alt={`${selectedDesign.name} ${idx + 1}`} />
+                              <img src={resolveImageUrl(img)} alt={`${galleryLabel} ${idx + 1}`} />
                             </button>
                           ))}
                         </div>
@@ -378,10 +542,22 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
                   )}
 
                   <div className="design-selected-name">
-                    Selected: <strong>{selectedDesign.name}</strong>
+                    {allDesignsOutOfStock ? (
+                      <span className="design-out-of-stock">
+                        All designs of this product are currently out of stock. Please check back later.
+                      </span>
+                    ) : selectedDesign ? (
+                      <>Selected design: <strong>{selectedDesign.name}</strong></>
+                    ) : initialDesignIdx !== null && designs[initialDesignIdx] && designs[initialDesignIdx].out_of_stock ? (
+                      <span className="design-out-of-stock">
+                        {designs[initialDesignIdx].name} is out of stock. Please select another design.
+                      </span>
+                    ) : (
+                      <span className="design-required">Please select a design to continue</span>
+                    )}
                   </div>
 
-                  {selectedDesign.video_link && (
+                  {selectedDesign && selectedDesign.video_link && (
                     <button
                       type="button"
                       className="design-video-btn"
@@ -399,26 +575,131 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
                   <div className="earning-text">
                     <span className="earning-label">Your Earnings</span>
                     <span className="earning-amount">
-                      Level Income{product.rank_name ? ` per ${product.rank_name} rank table (10 levels)` : ' (10 levels per rank)'} for your upline
+                      Level Income (10 levels) for your upline
                     </span>
                   </div>
                 </div>
               </div>
 
-              <div className="payment-note">
-                <p>Payment will be processed securely via Razorpay</p>
-              </div>
+              {!payConfig ? (
+                <div className="payment-note"><p>Loading payment options...</p></div>
+              ) : noPaymentMethod ? (
+                <div className="payment-note payment-note-warn">
+                  <p>Payments are temporarily unavailable. Please try again later.</p>
+                </div>
+              ) : razorpayOn && qrOn ? (
+                <div className="pay-methods" role="radiogroup" aria-label="Payment method">
+                  <span className="pay-methods-label">Choose payment method</span>
+                  <label className={`pay-method${payMethod === 'razorpay' ? ' active' : ''}`}>
+                    <input type="radio" name="pay-method" value="razorpay" checked={payMethod === 'razorpay'} onChange={() => setPayMethod('razorpay')} />
+                    <span className="pay-method-title">💳 Pay Online</span>
+                    <span className="pay-method-sub">Card / UPI / Netbanking via Razorpay · instant</span>
+                  </label>
+                  <label className={`pay-method${payMethod === 'qr' ? ' active' : ''}`}>
+                    <input type="radio" name="pay-method" value="qr" checked={payMethod === 'qr'} onChange={() => setPayMethod('qr')} />
+                    <span className="pay-method-title">📱 Scan QR &amp; Pay</span>
+                    <span className="pay-method-sub">Pay by any UPI app, upload screenshot · confirmed after admin approval</span>
+                  </label>
+                </div>
+              ) : (
+                <div className="payment-note">
+                  <p>{qrOn ? 'Pay by scanning the QR code with any UPI app' : 'Payment will be processed securely via Razorpay'}</p>
+                </div>
+              )}
             </div>
 
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={handleClose} disabled={loading}>
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={handlePurchase} disabled={loading}>
+              <button className="btn btn-primary" onClick={handlePay} disabled={loading || needsDesign || !payConfig || noPaymentMethod}>
                 {loading ? 'Processing...' : `Pay ₹${formatPrice(product.price)}`}
               </button>
             </div>
           </>
+        )}
+
+        {step === 'qr' && payConfig && (
+          <>
+            <div className="modal-header">
+              <h2>Scan &amp; Pay</h2>
+              <button className="close-btn" onClick={handleClose}>&times;</button>
+            </div>
+            <div className="modal-body">
+              <div className="qr-amount">
+                <span>Amount to pay</span>
+                <strong>₹{formatPrice(product.price)}</strong>
+                <small>{product.name}{selectedDesign ? ` · ${selectedDesign.name}` : ''}</small>
+              </div>
+              <div className="qr-box">
+                <img src={resolveImageUrl(payConfig.qr.image)} alt="Payment QR code" />
+                {payConfig.qr.payeeName && <div className="qr-payee">{payConfig.qr.payeeName}</div>}
+                {payConfig.qr.upiId && (
+                  <button
+                    type="button"
+                    className="qr-upi"
+                    onClick={() => {
+                      if (navigator.clipboard) {
+                        navigator.clipboard.writeText(payConfig.qr.upiId).then(() => toast.success('UPI ID copied')).catch(() => {});
+                      }
+                    }}
+                    title="Copy UPI ID"
+                  >
+                    UPI ID: <strong>{payConfig.qr.upiId}</strong> ⧉
+                  </button>
+                )}
+              </div>
+              <ol className="qr-steps">
+                <li>Scan the QR with any UPI app and pay <strong>exactly ₹{formatPrice(product.price)}</strong>.</li>
+                <li>Take a screenshot of the successful payment.</li>
+                <li>Attach it below with the transaction ID / UTR and submit.</li>
+              </ol>
+
+              <label className="qr-field">
+                <span>Payment screenshot *</span>
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleQrFile} />
+              </label>
+              {qrPreview && (
+                <div className="qr-preview"><img src={qrPreview} alt="Payment screenshot preview" /></div>
+              )}
+              <label className="qr-field">
+                <span>Transaction ID / UTR *</span>
+                <input
+                  type="text"
+                  maxLength={30}
+                  placeholder="e.g. 412345678901"
+                  value={qrUtr}
+                  onChange={(e) => setQrUtr(e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setStep('confirm')} disabled={qrSubmitting}>
+                Back
+              </button>
+              <button className="btn btn-primary" onClick={handleQrSubmit} disabled={qrSubmitting || !qrFile || !qrUtr.trim()}>
+                {qrSubmitting ? 'Submitting...' : 'Submit Payment'}
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === 'qr-submitted' && (
+          <div className="success-state">
+            <div className="success-icon">⏳</div>
+            <h3>Payment Submitted</h3>
+            <p>Your payment is under review. Your order will be created and your account activated once the admin approves it.</p>
+            <p className="redirect-note">You'll receive an email when it's reviewed. You can track it in My Orders.</p>
+            <button
+              className="btn btn-primary next-upgrade-btn"
+              onClick={() => {
+                onSuccess && onSuccess({ success: true, pending: true });
+                handleClose();
+              }}
+            >
+              Got it
+            </button>
+          </div>
         )}
 
         {step === 'processing' && (
@@ -434,54 +715,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
             <h3>Purchase Successful!</h3>
             <p>Your order has been placed successfully.</p>
 
-            {nextUpgrade && !nextUpgrade.at_top_rank && (
-              <div className="next-upgrade-card">
-                <div className="next-upgrade-head">
-                  <span className="next-upgrade-icon">🚀</span>
-                  <div>
-                    <span className="next-upgrade-title">Next Auto Upgrade: {nextUpgrade.next_rank_name} — ₹{formatPrice(nextUpgrade.next_price)}</span>
-                    <span className="next-upgrade-sub">No second purchase needed — this buys itself</span>
-                  </div>
-                </div>
-                <div className="next-upgrade-bar">
-                  <div
-                    className="next-upgrade-fill"
-                    style={{ width: `${Math.min(100, Math.round(nextUpgrade.progress || 0))}%` }}
-                  ></div>
-                </div>
-                <p className="next-upgrade-note">
-                  {nextUpgrade.shortfall > 0
-                    ? <>Repurchase Wallet: <strong>₹{formatPrice(nextUpgrade.repurchase_balance)}</strong> · need <strong>₹{formatPrice(nextUpgrade.shortfall)}</strong> more to auto-trigger. Every withdrawal adds 20% automatically.</>
-                    : <>Repurchase Wallet is ready — your upgrade will trigger automatically on the next engine run.</>}
-                </p>
-              </div>
-            )}
-            {nextUpgrade && nextUpgrade.at_top_rank && (
-              <div className="next-upgrade-card top">
-                <div className="next-upgrade-head">
-                  <span className="next-upgrade-icon">🏆</span>
-                  <div>
-                    <span className="next-upgrade-title">Top rank reached!</span>
-                    <span className="next-upgrade-sub">Your repurchase balance keeps accumulating for future higher packages.</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {(!nextUpgrade || nextUpgrade.at_top_rank) && (
-              <p className="redirect-note">Redirecting to your orders...</p>
-            )}
-            {nextUpgrade && !nextUpgrade.at_top_rank && (
-              <button
-                className="btn btn-primary next-upgrade-btn"
-                onClick={() => {
-                  onSuccess && onSuccess({ success: true });
-                  onClose();
-                }}
-              >
-                Got it
-              </button>
-            )}
+            <p className="redirect-note">Redirecting to your orders...</p>
           </div>
         )}
 
@@ -617,6 +851,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
           font-size: 0.875rem;
           color: #6b7280;
           margin: 0 0 0.5rem 0;
+          white-space: pre-line;
           display: -webkit-box;
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
@@ -691,6 +926,30 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
           color: white;
         }
 
+        .design-tab.out-of-stock,
+        .design-tab.out-of-stock:hover {
+          opacity: 0.6;
+          cursor: not-allowed;
+          text-decoration: line-through;
+          background: #f3f4f6;
+          border-color: #e5e7eb;
+          color: #6b7280;
+        }
+
+        .design-tab-oos {
+          display: inline-block;
+          margin-left: 0.35rem;
+          font-size: 0.65rem;
+          font-weight: 700;
+          color: #b91c1c;
+          text-decoration: none;
+        }
+
+        .design-out-of-stock {
+          color: #b91c1c;
+          font-weight: 600;
+        }
+
         .design-main-image {
           position: relative;
           margin-top: 0.75rem;
@@ -761,6 +1020,11 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
 
         .design-selected-name strong {
           color: #111827;
+        }
+
+        .design-required {
+          color: #b45309;
+          font-weight: 600;
         }
 
         .design-video-btn {
@@ -1083,59 +1347,107 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
         }
 
         /* Post-purchase next-upgrade popup */
-        .next-upgrade-card {
-          width: 100%;
-          margin-top: 1.25rem;
-          padding: 1rem 1.1rem;
-          border-radius: 12px;
-          background: linear-gradient(135deg, #073C39 0%, #0B4541 100%);
-          color: white;
-          text-align: left;
-          box-shadow: 0 4px 20px rgba(7, 60, 57, 0.3);
-        }
-        .next-upgrade-card.top {
-          background: linear-gradient(135deg, #B18B36 0%, #996F19 100%);
-        }
-        .next-upgrade-head {
+        .pay-methods {
           display: flex;
-          align-items: flex-start;
-          gap: 0.65rem;
-          margin-bottom: 0.65rem;
+          flex-direction: column;
+          gap: 0.5rem;
+          margin-top: 1rem;
         }
-        .next-upgrade-icon {
-          font-size: 1.5rem;
-          line-height: 1;
+        .pay-methods-label {
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: #374151;
         }
-        .next-upgrade-title {
-          display: block;
-          font-weight: 700;
+        .pay-method {
+          display: grid;
+          grid-template-columns: auto 1fr;
+          column-gap: 0.6rem;
+          align-items: center;
+          padding: 0.75rem 0.9rem;
+          border: 1.5px solid #e5e7eb;
+          border-radius: 10px;
+          cursor: pointer;
+        }
+        .pay-method input { grid-row: span 2; accent-color: #073C39; }
+        .pay-method.active { border-color: #073C39; background: #f2f6f4; }
+        .pay-method-title { font-weight: 600; color: #111827; font-size: 0.95rem; }
+        .pay-method-sub { font-size: 0.78rem; color: #6b7280; }
+        .payment-note-warn { background: #fef3c7 !important; }
+        .payment-note-warn p { color: #92400e !important; }
+        .qr-amount {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0.15rem;
+          margin-bottom: 1rem;
+        }
+        .qr-amount span { font-size: 0.8rem; color: #6b7280; }
+        .qr-amount strong { font-size: 1.75rem; color: #073C39; }
+        .qr-amount small { font-size: 0.8rem; color: #6b7280; }
+        .qr-box {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0.4rem;
+          padding: 1rem;
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          background: #fff;
+        }
+        .qr-box img {
+          width: 100%;
+          max-width: 240px;
+          aspect-ratio: 1;
+          object-fit: contain;
+        }
+        .qr-payee { font-weight: 600; color: #111827; }
+        .qr-upi {
+          background: #f3f4f6;
+          border: none;
+          border-radius: 6px;
+          padding: 0.3rem 0.6rem;
+          font-size: 0.85rem;
+          color: #374151;
+          cursor: pointer;
+          word-break: break-all;
+        }
+        .qr-steps {
+          margin: 1rem 0;
+          padding-left: 1.2rem;
+          font-size: 0.85rem;
+          color: #4b5563;
+          line-height: 1.6;
+        }
+        .qr-field {
+          display: flex;
+          flex-direction: column;
+          gap: 0.35rem;
+          margin-bottom: 0.9rem;
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: #374151;
+        }
+        .qr-field input[type="text"] {
+          padding: 0.65rem 0.75rem;
+          border: 1.5px solid #d1d5db;
+          border-radius: 8px;
           font-size: 0.95rem;
+          font-weight: 400;
         }
-        .next-upgrade-sub {
-          display: block;
-          font-size: 0.78rem;
-          color: rgba(255, 255, 255, 0.75);
-          margin-top: 0.15rem;
-        }
-        .next-upgrade-bar {
-          height: 8px;
-          border-radius: 99px;
-          background: rgba(255, 255, 255, 0.2);
+        .qr-field input[type="text"]:focus { outline: none; border-color: #073C39; }
+        .qr-field input[type="file"] { font-weight: 400; font-size: 0.85rem; max-width: 100%; }
+        .qr-preview {
+          margin: -0.4rem 0 0.9rem;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
           overflow: hidden;
-          margin-bottom: 0.65rem;
+          max-height: 220px;
+          display: flex;
+          justify-content: center;
+          background: #f9fafb;
         }
-        .next-upgrade-fill {
-          height: 100%;
-          border-radius: 99px;
-          background: #ECCA7B;
-          transition: width 0.4s ease;
-        }
-        .next-upgrade-note {
-          margin: 0;
-          font-size: 0.8rem;
-          color: rgba(255, 255, 255, 0.85);
-          line-height: 1.5;
-        }
+        .qr-preview img { max-height: 220px; max-width: 100%; object-fit: contain; }
+
         .next-upgrade-btn {
           margin-top: 1.25rem;
           min-width: 140px;
@@ -1182,7 +1494,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
         <img
           className="design-lightbox-image"
           src={resolveImageUrl(previewImage)}
-          alt={`${selectedDesign ? selectedDesign.name : product.name} - full view`}
+          alt={`${galleryLabel} - full view`}
           onClick={(e) => e.stopPropagation()}
         />
         {designImages.length > 1 && (
@@ -1200,7 +1512,7 @@ const PurchaseModal = ({ isOpen, onClose, product, onSuccess }) => {
               &#8250;
             </button>
             <div className="design-lightbox-caption">
-              {selectedDesign ? `${selectedDesign.name} · ${designImageIdx + 1} / ${designImages.length}` : ''}
+              {`${galleryLabel} · ${designImageIdx + 1} / ${designImages.length}`}
             </div>
           </>
         )}

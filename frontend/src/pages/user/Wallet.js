@@ -9,13 +9,11 @@ const fmt = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigit
 
 const Wallet = () => {
   const [earningsBalance, setEarningsBalance] = useState(0);
-  const [repurchaseBalance, setRepurchaseBalance] = useState(0);
-  const [nextUpgrade, setNextUpgrade] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [txPage, setTxPage] = useState(1);
   const [txTotalPages, setTxTotalPages] = useState(1);
   const [txTotal, setTxTotal] = useState(0);
-  const [stats, setStats] = useState({ total_earned: 0, total_withdrawn: 0, total_spent: 0 });
+  const [stats, setStats] = useState({ total_earned: 0, total_withdrawn: 0, total_spent: 0, reward_income: 0 });
   const [txFilter, setTxFilter] = useState('');
 
   useEffect(() => {
@@ -30,8 +28,6 @@ const Wallet = () => {
     try {
       const response = await walletAPI.getBalance();
       setEarningsBalance(response.data.earnings_balance || 0);
-      setRepurchaseBalance(Number(response.data.repurchase_balance || 0));
-      setNextUpgrade(response.data.next_upgrade || null);
     } catch (error) {
       console.error('Failed to fetch balance');
     }
@@ -84,43 +80,6 @@ const Wallet = () => {
           </div>
         </div>
 
-        {/* Repurchase Wallet (rank upgrade fund) */}
-        <div className="wallet-card repurchase-card">
-          <div className="wallet-content">
-            <div className="wallet-label">Repurchase Wallet</div>
-            <div className="wallet-balance">₹{fmt(repurchaseBalance)}</div>
-            <div className="repurchase-hint">
-              {nextUpgrade ? (
-                nextUpgrade.shortfall > 0 ? (
-                  <>Funds your next rank upgrade to <strong>{nextUpgrade.rank_name}</strong> (₹{nextUpgrade.price.toLocaleString('en-IN')}) — auto-bought when complete.</>
-                ) : (
-                  <>Ready: <strong>{nextUpgrade.rank_name}</strong> (₹{nextUpgrade.price.toLocaleString('en-IN')}) will be auto-purchased shortly.</>
-                )
-              ) : (
-                <>You've reached the top rank. Future higher packages will be auto-purchased as they're added.</>
-              )}
-            </div>
-            {nextUpgrade && (
-              <div className="upgrade-progress">
-                <div className="upgrade-progress-bar">
-                  <div
-                    className="upgrade-progress-fill"
-                    style={{ width: `${Math.min(100, Math.round(nextUpgrade.progress || 0))}%` }}
-                  ></div>
-                </div>
-                <span className="upgrade-progress-text">
-                  {Math.min(100, Math.round(nextUpgrade.progress || 0))}% of ₹{nextUpgrade.price.toLocaleString('en-IN')}
-                  {nextUpgrade.shortfall > 0 && ` · ₹${nextUpgrade.shortfall.toLocaleString('en-IN')} to go`}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="wallet-decoration">
-            <div className="decoration-circle c1"></div>
-            <div className="decoration-circle c2"></div>
-          </div>
-        </div>
-
         {/* Quick Stats — lifetime totals computed server-side */}
         <div className="wallet-stats">
           <div className="wallet-stat-card">
@@ -130,6 +89,13 @@ const Wallet = () => {
               <span className="stat-label">Total Earned</span>
             </div>
           </div>
+          <Link to="/rewards" className="wallet-stat-card reward-stat">
+            <span className="stat-icon">🏆</span>
+            <div className="stat-content">
+              <span className="stat-value">₹{fmt(stats.reward_income)}</span>
+              <span className="stat-label">Reward Income</span>
+            </div>
+          </Link>
           <div className="wallet-stat-card">
             <span className="stat-icon">🏧</span>
             <div className="stat-content">
@@ -169,9 +135,9 @@ const Wallet = () => {
                 <option value="purchase">Purchases</option>
                 <option value="refund">Refunds</option>
                 <option value="team_income">Level Income</option>
+                <option value="reward">Milestone Rewards</option>
                 <option value="withdrawal">Withdrawals</option>
                 <option value="withdrawal_reversal">Withdrawal Reversals</option>
-                <option value="repurchase">Repurchase</option>
               </select>
             </div>
           </div>
@@ -204,6 +170,7 @@ const Wallet = () => {
                           {tx.type === 'refund' && '↩️ Refund'}
                           {tx.type === 'bonus' && '🎁 Bonus'}
                           {tx.type === 'team_income' && '👥 Level Income'}
+                          {tx.type === 'reward' && `🏆 ${tx.description || 'Milestone Reward'}`}
                           {tx.type === 'withdrawal' && '🏧 Withdrawal'}
                           {tx.type === 'withdrawal_reversal' && '↩️ Withdrawal Reversal'}
                           {tx.type === 'repurchase' && '🔄 Repurchase'}
@@ -365,14 +332,23 @@ const Wallet = () => {
 
         .wallet-stats {
           display: grid;
-          grid-template-columns: repeat(4, 1fr);
+          grid-template-columns: repeat(5, 1fr);
           gap: 1rem;
           margin-bottom: 1.5rem;
+        }
+
+        @media (min-width: 769px) and (max-width: 1200px) {
+          .wallet-stats {
+            grid-template-columns: repeat(3, 1fr);
+          }
         }
 
         @media (max-width: 768px) {
           .wallet-stats {
             grid-template-columns: repeat(2, 1fr);
+          }
+          .wallet-stats > :last-child:nth-child(odd) {
+            grid-column: 1 / -1;
           }
         }
 
@@ -397,6 +373,15 @@ const Wallet = () => {
           color: var(--gray-900);
           display: block;
         }
+
+        a.wallet-stat-card { text-decoration: none; }
+        .wallet-stat-card.reward-stat {
+          background: linear-gradient(135deg, #B18B36 0%, #073C39 100%);
+          border: none;
+        }
+        .wallet-stat-card.reward-stat .stat-value,
+        .wallet-stat-card.reward-stat .stat-label { color: #fff; }
+        .wallet-stat-card.reward-stat .stat-label { opacity: 0.85; }
 
         .wallet-stat-card .stat-label {
           font-size: 0.75rem;

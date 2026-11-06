@@ -82,9 +82,7 @@ const Settings = {
     const [rows] = await connection.execute(
       `SELECT setting_key, setting_value FROM settings
        WHERE setting_key LIKE 'qualification_%'
-          OR setting_key LIKE 'withdrawal_%'
-          OR setting_key = 'repurchase_share_percent'
-          OR setting_key = 'auto_repurchase_enabled'`
+          OR setting_key LIKE 'withdrawal_%'`
     );
     rows.forEach(r => { all[r.setting_key] = r.setting_value; });
 
@@ -98,11 +96,7 @@ const Settings = {
         startTime: all.withdrawal_start_time || '07:00',
         endTime: all.withdrawal_end_time || '10:00',
         timezone: all.withdrawal_timezone || 'Asia/Kolkata',
-        adminChargePercent: parseFloat(all.withdrawal_admin_charge_percent) || 0,
-        repurchaseSharePercent: parseFloat(all.repurchase_share_percent) || 0
-      },
-      autoRepurchase: {
-        enabled: all.auto_repurchase_enabled === 'true'
+        adminChargePercent: parseFloat(all.withdrawal_admin_charge_percent) || 0
       }
     };
   },
@@ -116,15 +110,33 @@ const Settings = {
     if (data.withdrawal_min_amount !== undefined) settings.withdrawal_min_amount = data.withdrawal_min_amount;
     if (data.withdrawal_start_time !== undefined) settings.withdrawal_start_time = data.withdrawal_start_time;
     if (data.withdrawal_end_time !== undefined) settings.withdrawal_end_time = data.withdrawal_end_time;
-    if (data.withdrawal_timezone !== undefined) settings.withdrawal_timezone = data.withdrawal_timezone;
-    if (data.withdrawal_admin_charge_percent !== undefined) settings.withdrawal_admin_charge_percent = data.withdrawal_admin_charge_percent;
-    if (data.repurchase_share_percent !== undefined) settings.repurchase_share_percent = data.repurchase_share_percent;
-    if (data.auto_repurchase_enabled !== undefined) settings.auto_repurchase_enabled = data.auto_repurchase_enabled;
+    if (data.withdrawal_timezone !== undefined) settings.withdrawal_timezone = data.withdrawal_timezone;    if (data.withdrawal_admin_charge_percent !== undefined) settings.withdrawal_admin_charge_percent = data.withdrawal_admin_charge_percent;
 
     if (Object.keys(settings).length > 0) {
       await this.setMultiple(settings, connection);
     }
     return settings;
+  },
+
+  // -------------------------------------------------------------------
+  // Payment methods (Razorpay gateway / manual static QR). Missing keys
+  // default to Razorpay ON, QR OFF — the behaviour before QR existed.
+  // -------------------------------------------------------------------
+  PAYMENT_KEYS: ['payment_razorpay_enabled', 'payment_qr_enabled', 'payment_qr_image', 'payment_upi_id', 'payment_payee_name'],
+
+  async getPaymentSettings(connection = pool) {
+    const [rows] = await connection.execute(
+      `SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('payment_razorpay_enabled','payment_qr_enabled','payment_qr_image','payment_upi_id','payment_payee_name')`
+    );
+    const m = {};
+    rows.forEach(r => { m[r.setting_key] = r.setting_value; });
+    return {
+      razorpayEnabled: m.payment_razorpay_enabled !== undefined ? m.payment_razorpay_enabled === 'true' : true,
+      qrEnabled: m.payment_qr_enabled === 'true',
+      qrImage: m.payment_qr_image || '',
+      upiId: m.payment_upi_id || '',
+      payeeName: m.payment_payee_name || ''
+    };
   },
 
   // -------------------------------------------------------------------

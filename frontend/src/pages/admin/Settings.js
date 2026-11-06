@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
-import { adminAPI } from '../../utils/api';
+import { adminAPI, paymentAPI } from '../../utils/api';
 import { useSiteSettings } from '../../components/SiteSettingsProvider';
 import AdminLayout from '../../components/AdminLayout';
 import ConfirmationDialog from '../../components/ConfirmationDialog';
@@ -17,18 +17,16 @@ const DEFAULT_INCOME = {
   withdrawal_start_time: '07:00',
   withdrawal_end_time: '10:00',
   withdrawal_timezone: 'Asia/Kolkata',
-  withdrawal_admin_charge_percent: 5,
-  repurchase_share_percent: 20,
-  repurchase_enabled: true,
-  auto_repurchase_enabled: true
+  withdrawal_admin_charge_percent: 5
 };
+
+const DEFAULT_PAYMENT = { razorpayEnabled: true, qrEnabled: false, qrImage: '', upiId: '', payeeName: '' };
 
 // Flatten the nested GET response into the flat keys the form/edit uses.
 const flattenIncome = (s) => {
   if (!s) return { ...DEFAULT_INCOME };
   const q = s.qualification || {};
   const w = s.withdrawal || {};
-  const ar = s.autoRepurchase || {};
   return {
     qualification_levels_per_direct: q.levelsPerDirect ?? DEFAULT_INCOME.qualification_levels_per_direct,
     qualification_max_levels: q.maxLevels ?? DEFAULT_INCOME.qualification_max_levels,
@@ -36,10 +34,7 @@ const flattenIncome = (s) => {
     withdrawal_start_time: w.startTime ?? DEFAULT_INCOME.withdrawal_start_time,
     withdrawal_end_time: w.endTime ?? DEFAULT_INCOME.withdrawal_end_time,
     withdrawal_timezone: w.timezone ?? DEFAULT_INCOME.withdrawal_timezone,
-    withdrawal_admin_charge_percent: w.adminChargePercent ?? DEFAULT_INCOME.withdrawal_admin_charge_percent,
-    repurchase_share_percent: w.repurchaseSharePercent ?? DEFAULT_INCOME.repurchase_share_percent,
-    repurchase_enabled: !!s.repurchase_enabled,
-    auto_repurchase_enabled: !!ar.enabled
+    withdrawal_admin_charge_percent: w.adminChargePercent ?? DEFAULT_INCOME.withdrawal_admin_charge_percent
   };
 };
 
@@ -60,6 +55,12 @@ const AdminSettings = () => {
   const [uploading, setUploading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const { refreshSettings } = useSiteSettings();
+
+  // Payment methods (saved separately from the income form)
+  const [payment, setPayment] = useState({ ...DEFAULT_PAYMENT });
+  const [originalPayment, setOriginalPayment] = useState(null);
+  const [paymentSaving, setPaymentSaving] = useState(false);
+  const [qrUploading, setQrUploading] = useState(false);
 
   // Audit logs
   const [auditLogs, setAuditLogs] = useState([]);
@@ -82,10 +83,15 @@ const AdminSettings = () => {
 
   const fetchSettings = async () => {
     try {
-      const [settingsRes, siteRes] = await Promise.all([
+      const [settingsRes, siteRes, paymentRes] = await Promise.all([
         adminAPI.getSettings(),
-        adminAPI.getSiteSettings()
+        adminAPI.getSiteSettings(),
+        paymentAPI.getPaymentSettings().catch(() => null)
       ]);
+      if (paymentRes?.data?.settings) {
+        setPayment(paymentRes.data.settings);
+        setOriginalPayment(paymentRes.data.settings);
+      }
       const flat = flattenIncome(settingsRes.data.settings);
       setSettings(flat);
       setOriginalSettings(flat);
@@ -134,6 +140,48 @@ const AdminSettings = () => {
   };
 
   const removeLogo = () => setSiteSettings(prev => ({ ...prev, site_logo: '' }));
+
+  const handleQrUpload = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { toast.error('QR image must be JPG, PNG or WEBP'); return; }
+    if (file.size > 2 * 1024 * 1024) { toast.error('QR image must be less than 2MB'); return; }
+    setQrUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      const res = await paymentAPI.uploadPaymentQr(formData);
+      setPayment(prev => ({ ...prev, qrImage: res.data.image_url }));
+      toast.success('QR uploaded — click Save Payment Settings to apply');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to upload QR image');
+    } finally {
+      setQrUploading(false);
+    }
+  };
+
+  const savePayment = async () => {
+    if (payment.qrEnabled && !payment.qrImage) {
+      toast.error('Upload a QR code image before enabling QR payment');
+      return;
+    }
+    setPaymentSaving(true);
+    try {
+      const res = await paymentAPI.updatePaymentSettings(payment);
+      setPayment(res.data.settings);
+      setOriginalPayment(res.data.settings);
+      toast.success('Payment settings saved');
+      fetchAuditLogs(1);
+      setAuditPage(1);
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to save payment settings');
+    } finally {
+      setPaymentSaving(false);
+    }
+  };
+
+  const paymentChanged = originalPayment && JSON.stringify(payment) !== JSON.stringify(originalPayment);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -202,10 +250,10 @@ const AdminSettings = () => {
               <form onSubmit={handleSubmit}>
                 {/* Team Income */}
                 <div className="setting-section">
-                  <h4 className="setting-section-title">👥 Team Income (Per Rank)</h4>
+                  <h4 className="setting-section-title">👥 Team Income</h4>
                   <div className="setting-hint">
-                    Level income is now configured <strong>per rank product</strong> (8 levels each) — set the amounts on each product in
-                    <strong> Products</strong>. Rank tables: Star ₹349, Silver ₹849, Gold ₹1749, Platinum ₹4449.
+                    Level income is configured on the <strong>Star package</strong> (the only purchasable product) — set the
+                    L1–L10 amounts on it in <strong>Products</strong>. All other products are display-only repurchase products.
                   </div>
                 </div>
 
@@ -219,7 +267,7 @@ const AdminSettings = () => {
                     <div className="form-group">
                       <label className="form-label">Max Levels</label>
                       <input type="number" name="qualification_max_levels" className="form-input" value={settings.qualification_max_levels} onChange={handleChange} min="1" max="10" />
-                      <span className="form-hint">Hard cap on distributable levels (8)</span>
+                      <span className="form-hint">Levels that pay team income (1–10). Users also see their team (My Network) only up to this level.</span>
                     </div>
                   </div>
                 </div>
@@ -233,32 +281,10 @@ const AdminSettings = () => {
                       <input type="number" name="withdrawal_admin_charge_percent" className="form-input" value={settings.withdrawal_admin_charge_percent} onChange={handleChange} min="0" max="100" step="0.01" />
                       <span className="form-hint">Deducted from every processed withdrawal</span>
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">Repurchase Wallet Share (%)</label>
-                      <input type="number" name="repurchase_share_percent" className="form-input" value={settings.repurchase_share_percent} onChange={handleChange} min="0" max="100" step="0.01" />
-                      <span className="form-hint">Credited to the user's repurchase wallet</span>
-                    </div>
                   </div>
                   <div className="setting-hint">
-                    Payout to user = {100 - settings.withdrawal_admin_charge_percent - settings.repurchase_share_percent}%
-                    (admin charge {settings.withdrawal_admin_charge_percent}% + repurchase {settings.repurchase_share_percent}%).
-                    Example: ₹{fmt(1000)} → admin {fmt(settings.withdrawal_admin_charge_percent * 10)}, repurchase {fmt(settings.repurchase_share_percent * 10)}, user receives {fmt(1000 - (settings.withdrawal_admin_charge_percent + settings.repurchase_share_percent) * 10)}.
-                  </div>
-                </div>
-
-                {/* Auto Repurchase */}
-                <div className="setting-section">
-                  <div className="form-group">
-                    <label className="toggle-label">
-                      <div className="toggle-wrapper">
-                        <input type="checkbox" name="auto_repurchase_enabled" checked={settings.auto_repurchase_enabled} onChange={handleChange} className="toggle-input" />
-                        <span className="toggle-slider"></span>
-                      </div>
-                      <div className="toggle-content">
-                        <span className="toggle-title">Auto Repurchase Engine</span>
-                        <span className="toggle-desc">When the repurchase wallet affords the next higher rank, the system auto-buys it, distributes that rank's team income and upgrades the user's rank</span>
-                      </div>
-                    </label>
+                    Payout to user = {100 - settings.withdrawal_admin_charge_percent}% (admin charge {settings.withdrawal_admin_charge_percent}%).
+                    Example: {fmt(1000)} → admin {fmt(settings.withdrawal_admin_charge_percent * 10)}, user receives {fmt(1000 - settings.withdrawal_admin_charge_percent * 10)}.
                   </div>
                 </div>
 
@@ -291,16 +317,15 @@ const AdminSettings = () => {
                     </div>
                   </div>
                   <div className="setting-hint">
-                    Users can request withdrawals between <strong>{settings.withdrawal_start_time}</strong> and <strong>{settings.withdrawal_end_time}</strong> ({settings.withdrawal_timezone}).
+                    Users can request withdrawals on <strong>Fridays only</strong>, between <strong>{settings.withdrawal_start_time}</strong> and <strong>{settings.withdrawal_end_time}</strong> ({settings.withdrawal_timezone}).
                   </div>
                 </div>
 
                 {/* Repurchase */}
                 <div className="setting-section">
                   <div className="setting-hint">
-                    <strong>One-time purchase rule:</strong> every user buys a package once. Higher ranks are
-                    purchased <strong>only</strong> by the auto-repurchase engine from the user's Repurchase Wallet —
-                    second manual purchases are blocked. Use the engine toggle above to pause/enable auto-buying.
+                    <strong>One-time purchase rule:</strong> every user buys the Star package once — second purchases
+                    are blocked. Repurchase products are display-only until repurchase launches.
                   </div>
                 </div>
 
@@ -316,6 +341,77 @@ const AdminSettings = () => {
                   )}
                 </div>
               </form>
+            </div>
+
+            {/* Payment Methods */}
+            <div className="card animate-fade-in" style={{ animationDelay: '0.03s' }}>
+              <div className="card-header"><h3 className="card-title">💳 Payment Methods</h3></div>
+              <div className="setting-section">
+                <div className="setting-hint">
+                  Turn on one or both. When both are on, the user chooses how to pay. QR payments create the order only after
+                  you approve them in <strong>Payment Requests</strong>.
+                </div>
+                <div className="form-group">
+                  <label className="toggle-label">
+                    <div className="toggle-wrapper">
+                      <input type="checkbox" checked={!!payment.razorpayEnabled} onChange={(e) => setPayment(prev => ({ ...prev, razorpayEnabled: e.target.checked }))} className="toggle-input" />
+                      <span className="toggle-slider"></span>
+                    </div>
+                    <div className="toggle-content">
+                      <span className="toggle-title">Razorpay (online payment)</span>
+                      <span className="toggle-desc">Card / UPI / Netbanking checkout — order confirmed instantly</span>
+                    </div>
+                  </label>
+                </div>
+                <div className="form-group">
+                  <label className="toggle-label">
+                    <div className="toggle-wrapper">
+                      <input type="checkbox" checked={!!payment.qrEnabled} onChange={(e) => setPayment(prev => ({ ...prev, qrEnabled: e.target.checked }))} className="toggle-input" />
+                      <span className="toggle-slider"></span>
+                    </div>
+                    <div className="toggle-content">
+                      <span className="toggle-title">QR / UPI (manual approval)</span>
+                      <span className="toggle-desc">User scans your QR, uploads the screenshot + transaction ID, and you approve it</span>
+                    </div>
+                  </label>
+                </div>
+                {!payment.razorpayEnabled && !payment.qrEnabled && (
+                  <div className="setting-hint payment-off-warning">⚠️ Both methods are off — users cannot purchase.</div>
+                )}
+
+                <div className="qr-settings">
+                  <div className="qr-settings-preview">
+                    {payment.qrImage ? (
+                      <img src={getLogoUrl(payment.qrImage)} alt="Payment QR code" />
+                    ) : (
+                      <span>No QR uploaded</span>
+                    )}
+                  </div>
+                  <div className="qr-settings-fields">
+                    <label className="btn btn-secondary btn-sm qr-upload-btn">
+                      {qrUploading ? 'Uploading...' : payment.qrImage ? 'Replace QR Image' : 'Upload QR Image'}
+                      <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleQrUpload} disabled={qrUploading} hidden />
+                    </label>
+                    <div className="form-group">
+                      <label className="form-label">UPI ID</label>
+                      <input type="text" className="form-input" value={payment.upiId} onChange={(e) => setPayment(prev => ({ ...prev, upiId: e.target.value }))} placeholder="e.g. blisswell@okaxis" />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Payee Name</label>
+                      <input type="text" className="form-input" value={payment.payeeName} onChange={(e) => setPayment(prev => ({ ...prev, payeeName: e.target.value }))} placeholder="e.g. Blisswell Enterprises" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-actions">
+                  <button type="button" className="btn btn-primary" onClick={savePayment} disabled={paymentSaving || !paymentChanged}>
+                    {paymentSaving ? 'Saving...' : 'Save Payment Settings'}
+                  </button>
+                  {paymentChanged && (
+                    <button type="button" className="btn btn-ghost" onClick={() => setPayment(originalPayment)}>Reset</button>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Site Branding */}
@@ -480,25 +576,21 @@ const AdminSettings = () => {
             <div className="card info-card highlight animate-fade-in" style={{ animationDelay: '0.2s' }}>
               <div className="info-card-icon">🏧</div>
               <h4>Withdrawal Window</h4>
-              <p>Min <strong>{fmt(settings.withdrawal_min_amount)}</strong>. Requests accepted <strong>{settings.withdrawal_start_time}–{settings.withdrawal_end_time}</strong> ({settings.withdrawal_timezone}).</p>
+              <p>Min <strong>{fmt(settings.withdrawal_min_amount)}</strong>. Requests accepted <strong>Fridays, {settings.withdrawal_start_time}–{settings.withdrawal_end_time}</strong> ({settings.withdrawal_timezone}).</p>
             </div>
 
             <div className="card info-card animate-fade-in" style={{ animationDelay: '0.25s' }}>
               <div className="info-card-icon">✂️</div>
               <h4>Withdrawal Split</h4>
-              <p>Admin charge <strong>{settings.withdrawal_admin_charge_percent}%</strong>, repurchase wallet <strong>{settings.repurchase_share_percent}%</strong>, payout <strong>{100 - settings.withdrawal_admin_charge_percent - settings.repurchase_share_percent}%</strong>.</p>
+              <p>Admin charge <strong>{settings.withdrawal_admin_charge_percent}%</strong>, payout <strong>{100 - settings.withdrawal_admin_charge_percent}%</strong>.</p>
             </div>
 
             <div className="card info-card animate-fade-in" style={{ animationDelay: '0.3s' }}>
-              <div className="info-card-icon">🚀</div>
-              <h4>Auto Repurchase</h4>
-              <p>{settings.auto_repurchase_enabled ? 'Engine ON — repurchase wallet funds auto-buy the next higher rank (upgrade cascade).' : 'Engine off — repurchase wallet accumulates but no auto-buys.'}</p>
-            </div>
-
-            <div className="card info-card animate-fade-in" style={{ animationDelay: '0.3s' }}>
-              <div className="info-card-icon">🔄</div>
-              <h4>Repurchase</h4>
-              <p>{settings.repurchase_enabled ? 'Users can purchase products multiple times.' : 'Users can only purchase once.'}</p>
+              <div className="info-card-icon">💳</div>
+              <h4>Payment Methods</h4>
+              <p>
+                Razorpay <strong>{originalPayment?.razorpayEnabled ? 'ON' : 'OFF'}</strong> · QR <strong>{originalPayment?.qrEnabled ? 'ON' : 'OFF'}</strong>
+              </p>
             </div>
           </div>
         </div>
@@ -557,6 +649,17 @@ const AdminSettings = () => {
 
         .setting-section { padding: 1rem 0; border-top: 1px solid var(--gray-100); }
         .setting-section:first-child { border-top: none; padding-top: 0; }
+        .payment-off-warning { background: #fef3c7; color: #92400e; }
+        .qr-settings { display: flex; gap: 1.25rem; flex-wrap: wrap; margin: 1rem 0; }
+        .qr-settings-preview {
+          width: 160px; height: 160px; flex-shrink: 0;
+          border: 1px dashed var(--gray-300, #d1d5db); border-radius: 10px;
+          display: flex; align-items: center; justify-content: center;
+          background: #fff; overflow: hidden; font-size: 0.8rem; color: var(--gray-500, #6b7280);
+        }
+        .qr-settings-preview img { width: 100%; height: 100%; object-fit: contain; }
+        .qr-settings-fields { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 0.5rem; }
+        .qr-upload-btn { align-self: flex-start; cursor: pointer; }
         .setting-section-title { font-size: 0.95rem; font-weight: 600; color: var(--gray-900); margin: 0 0 0.75rem; }
         .toggle-block { margin-bottom: 0.75rem; }
         .setting-hint { font-size: 0.8125rem; color: var(--gray-600); background: var(--gray-50); padding: 0.5rem 0.75rem; border-radius: var(--radius-md); margin-top: 0.5rem; }

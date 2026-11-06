@@ -101,38 +101,14 @@ exports.verifyPayment = async (req, res) => {
   }
 };
 
-// Get wallet balance (includes the repurchase wallet + next upgrade info)
+// Get wallet balance
 exports.getBalance = async (req, res) => {
   try {
     const wallet = await Wallet.getByUserId(req.user.id);
 
-    // Next upgrade info (needs user's current product + active rank products)
-    let next_upgrade = null;
-    try {
-      const user = await User.findById(req.user.id);
-      if (user && user.has_active_package && user.current_product_id) {
-        const next = await Product.getNextHigherProduct(user.current_product_id);
-        if (next) {
-          const repurchase = parseFloat(wallet?.repurchase_balance) || 0;
-          const price = parseFloat(next.price);
-          next_upgrade = {
-            product_id: next.id,
-            rank_name: next.rank_name,
-            price,
-            shortfall: Math.max(0, price - repurchase),
-            progress: Math.min(100, (repurchase / price) * 100)
-          };
-        }
-      }
-    } catch (e) {
-      console.error('Next upgrade lookup error:', e);
-    }
-
     res.json({
       balance: wallet?.balance || 0,
-      earnings_balance: wallet?.earnings_balance || 0,
-      repurchase_balance: parseFloat(wallet?.repurchase_balance) || 0,
-      next_upgrade
+      earnings_balance: wallet?.earnings_balance || 0
     });
   } catch (error) {
     console.error('Get balance error:', error);

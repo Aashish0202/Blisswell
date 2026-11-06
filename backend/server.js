@@ -15,11 +15,17 @@ const ticketRoutes = require('./routes/ticketRoutes');
 const galleryRoutes = require('./routes/galleryRoutes');
 const contactRoutes = require('./routes/contactRoutes');
 const withdrawalRoutes = require('./routes/withdrawalRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
+const memberRoutes = require('./routes/memberRoutes');
 const Settings = require('./models/Settings');
+const OfferBanner = require('./models/OfferBanner');
+const Order = require('./models/Order');
+const PaymentRequest = require('./models/PaymentRequest');
+const RewardPlan = require('./models/RewardPlan');
 
 // Import cron
 const { initExpireProcessingOrdersCron } = require('./cron/expireProcessingOrders');
-const { initAutoRepurchaseCron } = require('./cron/autoRepurchase');
+const { initRewardReconciliationCron } = require('./cron/rewardReconciliation');
 
 // Auto-migration (runs pending schema migrations before the server starts)
 const { runMigrationsIfStale } = require('./services/autoMigration');
@@ -67,7 +73,13 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json());
+// Keep the raw body so the Razorpay webhook can verify its HMAC signature
+// against the exact bytes Razorpay signed (re-stringified JSON can differ).
+app.use(express.json({
+  verify: (req, res, buf) => {
+    if (req.originalUrl.startsWith('/api/orders/razorpay-webhook')) req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // CRITICAL: Disable caching for ALL API routes to prevent stale user data
@@ -102,6 +114,8 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/gallery', galleryRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/withdrawals', withdrawalRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/member', memberRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -193,6 +207,10 @@ const PORT = process.env.PORT || 5000;
 (async () => {
   try {
     await runMigrationsIfStale();
+    await OfferBanner.ensureTable();
+    await Order.ensureDesignSnapshot();
+    await PaymentRequest.ensureSchema();
+    await RewardPlan.ensureSchema();
   } catch (err) {
     console.error('❌ Startup migration failed — server not started. Fix the database and reboot.');
     console.error(err.message);
@@ -203,9 +221,10 @@ const PORT = process.env.PORT || 5000;
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
 
-    // Initialize cron jobs (daily-incentive cron retired with the salary model)
+    // Initialize cron jobs (daily-incentive cron retired with the salary model;
+    // auto-repurchase sweep retired with the repurchase wallet)
     initExpireProcessingOrdersCron();
-    initAutoRepurchaseCron();
+    initRewardReconciliationCron();
   });
 })();
 

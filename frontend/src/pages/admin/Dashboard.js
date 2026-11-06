@@ -116,12 +116,26 @@ const AdminDashboard = () => {
           </div>
 
           <div className="stat-card info">
-            <div className="stat-icon">🔄</div>
-            <div className="stat-label">Repurchase Credited</div>
-            <div className="stat-value">₹{(stats?.income?.repurchase_credited || 0).toLocaleString()}</div>
+            <div className="stat-icon">📱</div>
+            <div className="stat-label">QR Payments Pending</div>
+            <div className="stat-value">{stats?.qrPayments?.pending_count || 0}</div>
             <div className="stat-subtext">
-              20% of processed withdrawals → repurchase wallets
+              ₹{(stats?.qrPayments?.pending_amount || 0).toLocaleString()} awaiting approval
             </div>
+            <Link to="/admin/payment-requests" className="stat-link">Review Payments →</Link>
+          </div>
+
+          <div className="stat-card success">
+            <div className="stat-icon">🏆</div>
+            <div className="stat-label">Reward Income Paid</div>
+            <div className="stat-value">₹{(stats?.rewards?.paid_total || 0).toLocaleString()}</div>
+            <div className="stat-subtext">
+              {stats?.rewards?.paid_count || 0} rewards paid
+              {stats?.rewards?.awaiting_count > 0 && (
+                <span className="text-warning"> • {stats.rewards.awaiting_count} awaiting activation</span>
+              )}
+            </div>
+            <Link to="/admin/rewards" className="stat-link">View Rewards →</Link>
           </div>
         </div>
 
@@ -130,6 +144,10 @@ const AdminDashboard = () => {
           <div className="mini-stat">
             <span className="mini-stat-value text-primary">₹{(stats?.income?.team_income_paid || 0).toLocaleString()}</span>
             <span className="mini-stat-label">Team Income Paid</span>
+          </div>
+          <div className="mini-stat">
+            <span className="mini-stat-value text-primary">₹{(stats?.income?.reward_income_paid || 0).toLocaleString()}</span>
+            <span className="mini-stat-label">Reward Income Paid</span>
           </div>
           <div className="mini-stat">
             <span className="mini-stat-value text-success">₹{(stats?.withdrawals?.processed_amount || 0).toLocaleString()}</span>
@@ -232,6 +250,14 @@ const AdminDashboard = () => {
       <style>{`
         .admin-dashboard {
           max-width: 100%;
+        }
+
+        /* 5 main stat cards (incl. Reward Income) on one row on desktops */
+        @media (min-width: 1200px) {
+          .admin-dashboard .stats-grid {
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 1rem;
+          }
         }
 
         .page-header {

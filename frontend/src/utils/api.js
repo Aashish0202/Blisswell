@@ -51,6 +51,7 @@ export const authAPI = {
 // User API
 export const userAPI = {
   getDashboard: () => api.get('/user/dashboard'),
+  getOfferBanners: () => api.get('/user/offer-banners'),
   getProfile: () => api.get('/user/profile'),
   updateProfile: (data) => api.put('/user/profile', data),
   uploadProfileImage: (formData) => api.post('/user/profile/upload-image', formData, {
@@ -104,6 +105,24 @@ export const orderAPI = {
   recordFailedPayment: (data) => api.post('/orders/record-failed', data),
 };
 
+// Payment methods + manual QR/UPI payments
+export const paymentAPI = {
+  getConfig: () => api.get('/payments/config'),
+  submitQrPayment: (formData) => api.post('/payments/qr', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  getMyQrPayments: () => api.get('/payments/qr/mine'),
+  // Admin
+  getQrPayments: (page, filters) => api.get(`/payments/admin/qr?page=${page}`, { params: filters }),
+  approveQrPayment: (id) => api.put(`/payments/admin/qr/${id}/approve`),
+  rejectQrPayment: (id, reason) => api.put(`/payments/admin/qr/${id}/reject`, { reason }),
+  getPaymentSettings: () => api.get('/payments/admin/settings'),
+  updatePaymentSettings: (data) => api.put('/payments/admin/settings', data),
+  uploadPaymentQr: (formData) => api.post('/payments/admin/settings/upload-qr', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+};
+
 // Admin API
 export const adminAPI = {
   getDashboard: () => api.get('/admin/dashboard'),
@@ -120,13 +139,21 @@ export const adminAPI = {
   createProduct: (data) => api.post('/admin/products', data),
   updateProduct: (id, data) => api.put(`/admin/products/${id}`, data),
   deleteProduct: (id) => api.delete(`/admin/products/${id}`),
-  runAutoRepurchase: (userId) => api.post('/admin/auto-repurchase/run', { user_id: userId }),
   uploadProductImage: (formData) => api.post('/admin/products/upload-image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  }),
+  // Offer banners (user dashboard)
+  getOfferBanners: () => api.get('/admin/offer-banners'),
+  createOfferBanner: (data) => api.post('/admin/offer-banners', data),
+  updateOfferBanner: (id, data) => api.put(`/admin/offer-banners/${id}`, data),
+  deleteOfferBanner: (id) => api.delete(`/admin/offer-banners/${id}`),
+  uploadOfferBannerImage: (formData) => api.post('/admin/offer-banners/upload-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
   // Reports (new income model)
   getSalesReport: (start, end) => api.get(`/admin/reports/sales?start_date=${start}&end_date=${end}`),
   getTeamIncomeReport: (page, filters) => api.get(`/admin/reports/team-income?page=${page}`, { params: filters }),
+  getRewardIncomeReport: (page, filters) => api.get(`/admin/reports/reward-income?page=${page}`, { params: filters }),
   getWithdrawalReport: (page, filters) => api.get(`/admin/reports/withdrawals?page=${page}`, { params: filters }),
   getUserEarningsReport: (page, filters) => api.get(`/admin/reports/user-earnings?page=${page}`, { params: filters }),
   getReferralReport: (page, filters) => api.get(`/admin/reports/referrals?page=${page}`, { params: filters }),
@@ -160,7 +187,15 @@ export const adminAPI = {
   updateUserDetails: (userId, data) => api.put(`/admin/users/${userId}/details`, data),
   updateUserGST: (userId, gstNumber) => api.put(`/admin/users/${userId}/gst`, { gst_number: gstNumber }),
   // Invoice Migration
-  migrateInvoices: () => api.post('/admin/migrate-invoices')
+  migrateInvoices: () => api.post('/admin/migrate-invoices'),
+  // Milestone Rewards
+  getRewardPlans: () => api.get('/admin/reward-plans'),
+  createRewardPlan: (data) => api.post('/admin/reward-plans', data),
+  updateRewardPlan: (id, data) => api.put(`/admin/reward-plans/${id}`, data),
+  deleteRewardPlan: (id) => api.delete(`/admin/reward-plans/${id}`),
+  getRewardsReport: (params) => api.get('/admin/rewards/report', { params }),
+  recomputeUserRewards: (user) => api.post(`/admin/rewards/recompute/${encodeURIComponent(user)}`),
+  reconcileRewards: () => api.post('/admin/rewards/reconcile')
 };
 
 // Site Settings API (public)
@@ -184,6 +219,11 @@ export const ticketAPI = {
   // Admin
   getAllTickets: (page, filters) => api.get(`/tickets/admin/all?page=${page}`, { params: filters }),
   updateTicketStatus: (id, status) => api.put(`/tickets/admin/${id}/status`, { status })
+};
+
+// Member API (Milestone Rewards)
+export const memberAPI = {
+  getRewards: () => api.get('/member/rewards')
 };
 
 export default api;

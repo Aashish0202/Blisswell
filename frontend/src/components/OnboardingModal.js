@@ -67,8 +67,8 @@ const OnboardingModal = () => {
       description: 'Invite friends using your referral link. Earn Team Income for each active referral who purchases — 10 levels per rank!',
       features: [
         { icon: '🔗', title: 'Unique Link', description: 'Share your personal referral link' },
-        { icon: '🔄', title: 'Auto Repurchase', description: '20% of withdrawals auto-upgrades your rank' },
-        { icon: '📅', title: 'Withdrawals', description: 'Request a withdrawal (min ₹200) between 7–10 AM IST' }
+        { icon: '🔄', title: 'Repurchase', description: 'Repurchase products coming soon' },
+        { icon: '📅', title: 'Withdrawals', description: 'Request a withdrawal (min ₹200) on Fridays, 7–10 AM IST' }
       ]
     },
     tour: {

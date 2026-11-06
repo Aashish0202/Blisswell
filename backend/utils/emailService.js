@@ -103,6 +103,51 @@ const getEmailTemplate = (type, data) => {
         </div>
       `
     },
+    qrApproved: {
+      subject: `Payment Approved - ${data.siteName || 'Blisswell'}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #073C39 0%, #5D8172 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: white; margin: 0;">Payment Approved!</h1>
+          </div>
+          <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px;">
+            <p style="font-size: 16px; color: #374151;">Hello ${data.name},</p>
+            <p style="font-size: 16px; color: #374151;">Your QR/UPI payment has been verified and your order is confirmed. Your account is now active.</p>
+            <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+              <h3 style="margin-top: 0; color: #1f2937;">Order Details:</h3>
+              <p style="color: #4b5563;"><strong>Product:</strong> ${data.productName}</p>
+              <p style="color: #4b5563;"><strong>Amount:</strong> ₹${Number(data.amount || 0).toLocaleString()}</p>
+              <p style="color: #4b5563;"><strong>Invoice No:</strong> ${data.invoiceNumber}</p>
+              <p style="color: #4b5563;"><strong>Date:</strong> ${data.date}</p>
+            </div>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${data.dashboardUrl}" style="background: #073C39; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: 600;">View Order</a>
+            </div>
+          </div>
+        </div>
+      `
+    },
+    qrRejected: {
+      subject: `Payment Not Approved - ${data.siteName || 'Blisswell'}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background: linear-gradient(135deg, #073C39 0%, #5D8172 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: white; margin: 0;">Payment Not Approved</h1>
+          </div>
+          <div style="background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px;">
+            <p style="font-size: 16px; color: #374151;">Hello ${data.name},</p>
+            <p style="font-size: 16px; color: #374151;">We could not verify your QR/UPI payment for <strong>${data.productName}</strong> (₹${Number(data.amount || 0).toLocaleString()}, UTR ${data.utr}).</p>
+            <div style="background: #fef2f2; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #dc2626;">
+              <p style="font-size: 15px; color: #991b1b; margin: 0;"><strong>Reason:</strong> ${data.reason}</p>
+            </div>
+            <p style="font-size: 14px; color: #6b7280;">You can submit the payment details again from your dashboard, or contact support if you believe this is a mistake.</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${data.dashboardUrl}" style="background: #073C39; color: white; padding: 12px 30px; text-decoration: none; border-radius: 8px; font-weight: 600;">Go to My Orders</a>
+            </div>
+          </div>
+        </div>
+      `
+    },
     passwordReset: {
       subject: `Password Reset - ${data.siteName || 'Blisswell'}`,
       html: `
@@ -149,6 +194,9 @@ const getEmailTemplate = (type, data) => {
 
   return templates[type] || { subject: 'Notification', html: '<p>You have a new notification.</p>' };
 };
+
+const escapeHtml = (v) => String(v == null ? '' : v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // Send email function
 const sendEmail = async (to, type, data) => {
@@ -213,6 +261,34 @@ exports.sendPurchaseEmail = async (user, order, product) => {
     amount: order.total_amount || product.price,
     orderId: order.id,
     date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+    dashboardUrl: `${siteUrl}/orders`,
+    siteName: process.env.SITE_NAME || 'Blisswell'
+  });
+};
+
+// QR/UPI payment request approved by admin (order created)
+exports.sendQrPaymentApprovedEmail = async (user, info) => {
+  const siteUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  return sendEmail(user.email, 'qrApproved', {
+    name: escapeHtml(user.name),
+    productName: escapeHtml(info.productName),
+    amount: info.amount,
+    invoiceNumber: info.invoiceNumber,
+    date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+    dashboardUrl: `${siteUrl}/orders`,
+    siteName: process.env.SITE_NAME || 'Blisswell'
+  });
+};
+
+// QR/UPI payment request rejected by admin
+exports.sendQrPaymentRejectedEmail = async (user, info) => {
+  const siteUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  return sendEmail(user.email, 'qrRejected', {
+    name: escapeHtml(user.name),
+    productName: escapeHtml(info.productName),
+    amount: info.amount,
+    utr: escapeHtml(info.utr),
+    reason: escapeHtml(info.reason),
     dashboardUrl: `${siteUrl}/orders`,
     siteName: process.env.SITE_NAME || 'Blisswell'
   });

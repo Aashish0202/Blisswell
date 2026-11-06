@@ -5,6 +5,8 @@ const { verifyToken } = require('../middleware/auth');
 
 // Public routes
 router.get('/products', orderController.getProducts);
+// Razorpay server-to-server webhook (signature-verified, no auth token)
+router.post('/razorpay-webhook', orderController.razorpayWebhook);
 
 // Protected routes (require authentication)
 router.post('/create-payment-order', verifyToken, orderController.createPaymentOrder);

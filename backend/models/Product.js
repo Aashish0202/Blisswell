@@ -1,5 +1,16 @@
 const pool = require('../config/db');
 
+// Canonical shape of one design variant stored in products.designs (JSON).
+// out_of_stock: admin-set flag; out-of-stock designs stay visible to buyers
+// but cannot be purchased.
+const normalizeDesign = (d) => ({
+  name: String(d.name).trim(),
+  description: d.description ? String(d.description) : '',
+  video_link: d.video_link ? String(d.video_link) : '',
+  images: Array.isArray(d.images) ? d.images.filter(Boolean) : [],
+  out_of_stock: d.out_of_stock === true || d.out_of_stock === 1 || d.out_of_stock === 'true'
+});
+
 const Product = {
   // Helper function to parse images from database
   parseImages(product) {
@@ -47,7 +58,7 @@ const Product = {
     return { ...product, level_income: table.slice(0, 10) };
   },
 
-  // Parse the designs JSON into an array of {name, description, images: []}.
+  // Parse the designs JSON into an array of normalized designs (see normalizeDesign).
   // Empty/invalid → [] so callers can branch on designs.length.
   parseDesigns(product) {
     if (!product) return null;
@@ -61,12 +72,7 @@ const Product = {
           // Normalize: keep only well-formed entries with a name
           const designs = parsed
             .filter(d => d && typeof d === 'object' && (d.name || '').trim())
-            .map(d => ({
-              name: String(d.name).trim(),
-              description: d.description ? String(d.description) : '',
-              video_link: d.video_link ? String(d.video_link) : '',
-              images: Array.isArray(d.images) ? d.images.filter(Boolean) : []
-            }));
+            .map(normalizeDesign);
           return { ...product, designs };
         }
       } catch (e) {
@@ -93,6 +99,14 @@ const Product = {
     if (!designName) return null;
     const idx = designs.findIndex(d => d.name === designName);
     return idx >= 0 ? { index: idx, design: designs[idx] } : null;
+  },
+
+  // First image of the named design, stored on the order at purchase time so
+  // the order keeps showing what was bought even if the design is later edited.
+  designSnapshotImage(product, designName) {
+    if (!designName) return null;
+    const match = this.findDesign(product, designName);
+    return (match && match.design && match.design.images[0]) || null;
   },
 
   // Create product
@@ -127,18 +141,13 @@ const Product = {
       designsJson = JSON.stringify(
         productData.designs
           .filter(d => d && (d.name || '').trim())
-          .map(d => ({
-            name: String(d.name).trim(),
-            description: d.description ? String(d.description) : '',
-            video_link: d.video_link ? String(d.video_link) : '',
-            images: Array.isArray(d.images) ? d.images.filter(Boolean) : []
-          }))
+          .map(normalizeDesign)
       );
     }
 
     const [result] = await pool.execute(
-      `INSERT INTO products (name, rank_name, level_income, rank_order, description, price, salary_amount, salary_duration, daily_amount, days, image, images, youtube_link, is_active, designs)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (name, rank_name, level_income, rank_order, description, price, salary_amount, salary_duration, daily_amount, days, image, images, youtube_link, is_active, is_purchasable, designs)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         rank_name || null,
@@ -154,6 +163,7 @@ const Product = {
         imagesJson,
         youtube_link || null,
         is_active !== undefined ? is_active : true,
+        !!productData.is_purchasable,
         designsJson
       ]
     );
@@ -188,44 +198,14 @@ const Product = {
     return this.parseProduct(rows[0]);
   },
 
-  // All active rank products, lowest tier first
+  // Active purchasable packages (their level-income tables), lowest tier
+  // first. Display-only "repurchase" products are excluded.
   async getActiveRanks(connection = pool) {
     const conn = connection;
     const [rows] = await conn.execute(
-      'SELECT * FROM products WHERE is_active = TRUE ORDER BY rank_order ASC, price ASC'
+      'SELECT * FROM products WHERE is_active = TRUE AND is_purchasable = TRUE ORDER BY rank_order ASC, price ASC'
     );
     return rows.map(row => this.parseProduct(row));
-  },
-
-  // The next higher-priced active product above the given product's tier
-  // (by rank_order, falling back to price for legacy rows with no tier).
-  // Returns null at the top rank.
-  async getNextHigherProduct(currentProductId, connection = pool) {
-    const conn = connection;
-    const [cur] = await conn.execute('SELECT * FROM products WHERE id = ?', [currentProductId]);
-    const current = cur[0];
-    if (!current) return null;
-
-    if (current.rank_order != null && current.rank_order > 0) {
-      const [rows] = await conn.execute(
-        `SELECT * FROM products
-         WHERE is_active = TRUE AND rank_order > ?
-         ORDER BY rank_order ASC, price ASC
-         LIMIT 1`,
-        [current.rank_order]
-      );
-      return this.parseProduct(rows[0] || null);
-    }
-
-    // Legacy fallback: next higher by price
-    const [rows] = await conn.execute(
-      `SELECT * FROM products
-       WHERE is_active = TRUE AND price > ?
-       ORDER BY price ASC
-       LIMIT 1`,
-      [current.price]
-    );
-    return this.parseProduct(rows[0] || null);
   },
 
   // Update product
@@ -277,12 +257,7 @@ const Product = {
       values.push(designs.length > 0 ? JSON.stringify(
         designs
           .filter(d => d && (d.name || '').trim())
-          .map(d => ({
-            name: String(d.name).trim(),
-            description: d.description ? String(d.description) : '',
-            video_link: d.video_link ? String(d.video_link) : '',
-            images: Array.isArray(d.images) ? d.images.filter(Boolean) : []
-          }))
+          .map(normalizeDesign)
       ) : null);
       delete productData.designs;
     }

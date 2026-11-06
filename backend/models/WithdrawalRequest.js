@@ -29,9 +29,12 @@ const WithdrawalRequest = {
   async getById(id, connection = pool) {
     const conn = connection;
     const [rows] = await conn.execute(
-      `SELECT wr.*, u.name, u.email, u.mobile, u.pan_number, u.pan_status
+      `SELECT wr.*, u.name, u.email, u.mobile, u.referral_code, u.pan_number, u.pan_status,
+             k.bank_name, k.account_number, k.ifsc_code, k.branch_name,
+             k.nominee_name, k.nominee_relation, k.kyc_status
        FROM withdrawal_requests wr
        JOIN users u ON wr.user_id = u.id
+      LEFT JOIN user_kyc k ON k.id = (SELECT MAX(id) FROM user_kyc WHERE user_id = u.id)
        WHERE wr.id = ?`,
       [id]
     );
@@ -63,9 +66,12 @@ const WithdrawalRequest = {
     const conn = connection;
     const offset = (page - 1) * limit;
     let query = `
-      SELECT wr.*, u.name, u.email, u.mobile, u.pan_number, u.pan_status
+      SELECT wr.*, u.name, u.email, u.mobile, u.referral_code, u.pan_number, u.pan_status,
+             k.bank_name, k.account_number, k.ifsc_code, k.branch_name,
+             k.nominee_name, k.nominee_relation, k.kyc_status
       FROM withdrawal_requests wr
       JOIN users u ON wr.user_id = u.id
+      LEFT JOIN user_kyc k ON k.id = (SELECT MAX(id) FROM user_kyc WHERE user_id = u.id)
       WHERE 1=1
     `;
     const params = [];

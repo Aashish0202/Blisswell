@@ -1,6 +1,7 @@
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 // Ensure upload directories exist
 const ensureDirectory = (dir) => {
@@ -14,6 +15,9 @@ ensureDirectory('uploads/products/');
 ensureDirectory('uploads/logos/');
 ensureDirectory('uploads/gallery/');
 ensureDirectory('uploads/profiles/');
+ensureDirectory('uploads/banners/');
+ensureDirectory('uploads/payment-proofs/');
+ensureDirectory('uploads/payment-qr/');
 
 // Storage configuration for product images
 const productStorage = multer.diskStorage({
@@ -108,8 +112,79 @@ const uploadProfileImage = multer({
   fileFilter: imageFilter
 });
 
+// Storage configuration for offer banner images
+const bannerStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/banners/');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'banner-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+// Offer banner upload middleware
+const uploadBannerImage = multer({
+  storage: bannerStorage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB max file size
+  },
+  fileFilter: imageFilter
+});
+
+// Raster-only filter for payment screenshots / QR codes (no SVG — these are
+// served from /uploads and SVG can carry script).
+const rasterImageFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (/^\.(jpe?g|png|webp)$/.test(ext) && /^image\/(jpeg|png|webp)$/.test(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only JPG, PNG or WEBP images are allowed'), false);
+  }
+};
+
+// Storage for QR payment screenshots — unguessable names, since /uploads is public
+const paymentProofStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/payment-proofs/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, 'proof-' + crypto.randomBytes(16).toString('hex') + path.extname(file.originalname).toLowerCase());
+  }
+});
+
+const uploadPaymentProof = multer({
+  storage: paymentProofStorage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB max file size
+  },
+  fileFilter: rasterImageFilter
+});
+
+// Storage for the admin's static payment QR code
+const paymentQrStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/payment-qr/');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'qr-' + uniqueSuffix + path.extname(file.originalname).toLowerCase());
+  }
+});
+
+const uploadPaymentQr = multer({
+  storage: paymentQrStorage,
+  limits: {
+    fileSize: 2 * 1024 * 1024 // 2MB max file size
+  },
+  fileFilter: rasterImageFilter
+});
+
 module.exports = {
+  uploadPaymentProof,
+  uploadPaymentQr,
   uploadProductImage,
+  uploadBannerImage,
   uploadLogoImage,
   uploadGalleryImage,
   uploadProfileImage

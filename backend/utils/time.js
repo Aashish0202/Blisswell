@@ -46,11 +46,33 @@ function isWithinWithdrawalWindow(startTime = '07:00', endTime = '10:00', date =
   return now >= startTime && now < endTime;
 }
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const WEEKDAY_INDEX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+// Current IST day of week: 0=Sunday .. 6=Saturday.
+function getISTWeekday(date = new Date()) {
+  const short = new Intl.DateTimeFormat('en-US', { timeZone: IST_TZ, weekday: 'short' }).format(date);
+  return WEEKDAY_INDEX[short];
+}
+
+// Withdrawals are accepted on this IST weekday only (5 = Friday). The time
+// window on that day stays admin-configurable (withdrawal_start/end_time).
+const WITHDRAWAL_WEEKDAY = 5;
+
+// True when today (IST) is the withdrawal day.
+function isWithdrawalDay(date = new Date()) {
+  return getISTWeekday(date) === WITHDRAWAL_WEEKDAY;
+}
+
 module.exports = {
   IST_TZ,
+  DAY_NAMES,
   getISTParts,
   getISTDateString,
   getISTTimeString,
   getISTNow,
+  getISTWeekday,
+  WITHDRAWAL_WEEKDAY,
+  isWithdrawalDay,
   isWithinWithdrawalWindow
 };

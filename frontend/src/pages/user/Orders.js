@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-toastify';
-import { orderAPI, userAPI } from '../../utils/api';
+import { orderAPI, userAPI, paymentAPI } from '../../utils/api';
 import DashboardLayout from '../../components/DashboardLayout';
 import { useSiteSettings } from '../../components/SiteSettingsProvider';
 import EmptyState from '../../components/EmptyState';
@@ -166,6 +166,8 @@ const Orders = () => {
   // clicking a design tab on a product card swaps that card's images.
   const [selectedDesigns, setSelectedDesigns] = useState({});
   const [youtubeModal, setYoutubeModal] = useState({ isOpen: false, youtubeLink: '' });
+  // QR/UPI payments submitted for admin approval
+  const [qrPayments, setQrPayments] = useState([]);
   const invoiceRef = useRef(null);
   const { siteName, siteLogo, contact_address, contact_email, contact_phone, company_state } = useSiteSettings();
 
@@ -190,11 +192,13 @@ const Orders = () => {
 
   const fetchData = async () => {
     try {
-      const [ordersRes, productsRes, profileRes] = await Promise.all([
+      const [ordersRes, productsRes, profileRes, qrRes] = await Promise.all([
         orderAPI.getMyOrders(1),
         orderAPI.getProducts(),
-        userAPI.getProfile()
+        userAPI.getProfile(),
+        paymentAPI.getMyQrPayments().catch(() => ({ data: { requests: [] } }))
       ]);
+      setQrPayments(qrRes.data.requests || []);
       setOrders(ordersRes.data.orders);
       setOrdersTotal(ordersRes.data.total || ordersRes.data.orders.length);
       setOrdersTotalPages(ordersRes.data.totalPages || 1);
@@ -228,7 +232,8 @@ const Orders = () => {
   };
 
   const selectProductDesign = (productId, designIdx) => {
-    setSelectedDesigns(prev => ({ ...prev, [productId]: designIdx }));
+    // Clicking the active design again deselects it (back to main images).
+    setSelectedDesigns(prev => ({ ...prev, [productId]: prev[productId] === designIdx ? null : designIdx }));
   };
 
   const openPurchaseDialog = (product) => {
@@ -375,6 +380,35 @@ const Orders = () => {
           </div>
         </div>
 
+        {/* QR/UPI payments awaiting or after admin review (approved ones
+            already appear as orders below, so only pending/rejected show) */}
+        {qrPayments.some(r => r.status !== 'approved') && (
+          <div className="card qr-payments-card">
+            <div className="card-header">
+              <h3 className="card-title">QR Payments</h3>
+            </div>
+            <div className="qr-payments-list">
+              {qrPayments.filter(r => r.status !== 'approved').map(r => (
+                <div key={r.id} className={`qr-payment-row ${r.status}`}>
+                  <div className="qr-payment-main">
+                    <strong>{r.product_name}{r.design_name ? ` · ${r.design_name}` : ''}</strong>
+                    <span>₹{parseFloat(r.amount).toLocaleString()} · UTR {r.utr} · {new Date(r.created_at).toLocaleDateString('en-IN')}</span>
+                    {r.status === 'rejected' && r.reject_reason && (
+                      <span className="qr-payment-reason">Reason: {r.reject_reason}</span>
+                    )}
+                  </div>
+                  <span className={`badge ${r.status === 'pending' ? 'badge-warning' : 'badge-danger'}`}>
+                    {r.status === 'pending' ? 'Under review' : 'Rejected'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {qrPayments.some(r => r.status === 'rejected') && !qrPayments.some(r => r.status !== 'rejected') && (
+              <p className="qr-payments-hint">You can submit the payment again from the product below.</p>
+            )}
+          </div>
+        )}
+
         {/* Products Available */}
         <div className="card">
           <div className="card-header">
@@ -392,8 +426,11 @@ const Orders = () => {
                 // Designs (optional variants): the selected design's images
                 // take over the card's image slider until it has images.
                 const productDesigns = Array.isArray(product.designs) ? product.designs : [];
-                const designIdx = selectedDesigns[product.id] ?? 0;
-                const selectedDesign = productDesigns[designIdx] || null;
+                // No design is picked until the buyer clicks one, so the card opens on
+                // the main product images.
+                const designIdx = selectedDesigns[product.id] ?? null;
+                const selectedDesign = designIdx !== null ? (productDesigns[designIdx] || null) : null;
+                const allDesignsOutOfStock = productDesigns.length > 0 && productDesigns.every(d => d.out_of_stock);
                 const displayImages = selectedDesign && selectedDesign.images && selectedDesign.images.length > 0
                   ? selectedDesign.images
                   : productImages;
@@ -429,12 +466,21 @@ const Orders = () => {
                           <button
                             key={`${d.name}-${i}`}
                             type="button"
-                            className={`card-design-tab${i === designIdx ? ' active' : ''}`}
+                            className={`card-design-tab${i === designIdx ? ' active' : ''}${d.out_of_stock ? ' out-of-stock' : ''}`}
                             onClick={() => selectProductDesign(product.id, i)}
+                            title={d.out_of_stock ? 'This design is out of stock' : undefined}
                           >
                             {d.name}
+                            {d.out_of_stock && <span className="card-design-oos">Out of stock</span>}
                           </button>
                         ))}
+                      </div>
+                    )}
+                    {allDesignsOutOfStock ? (
+                      <div className="card-design-stock-msg">All designs are currently out of stock</div>
+                    ) : selectedDesign && selectedDesign.out_of_stock && (
+                      <div className="card-design-stock-msg">
+                        {selectedDesign.name} is out of stock — please select another design
                       </div>
                     )}
                     {selectedDesign && selectedDesign.description && (
@@ -454,7 +500,9 @@ const Orders = () => {
                     <div className="product-content">
                       <h4 className="product-title">
                         {product.name}
-                        {product.rank_name && <span className="rank-chip">★ {product.rank_name}</span>}
+                        {product.is_purchasable
+                          ? (product.rank_name && <span className="rank-chip">★ {product.rank_name}</span>)
+                          : <span className="rank-chip">Repurchase · Coming Soon</span>}
                       </h4>
                       <div className={`product-desc-wrapper ${expandedDescriptions[product.id] ? 'expanded' : ''}`}>
                         <p className="product-desc">
@@ -476,19 +524,31 @@ const Orders = () => {
                           <span className="benefit-icon">💰</span>
                           <span className="benefit-title">Product Benefits</span>
                         </div>
-                        <div className="benefit-details">
-                          <div className="benefit-row">
-                            <span className="benefit-label">Rank</span>
-                            <span className="benefit-value">{product.rank_name || 'Rank Package'}</span>
-                          </div>
-                          <div className="benefit-row highlight">
-                            <span className="benefit-label">Level Income</span>
-                            <span className="benefit-value total">
-                              {product.rank_name ? `${product.rank_name} · 10 levels` : '10 levels per rank'}
-                            </span>
-                          </div>
-                        </div>
-                        <p className="benefit-note">Income from your team's purchases & auto rank upgrades</p>
+                        {product.is_purchasable ? (
+                          <>
+                            <div className="benefit-details">
+                              <div className="benefit-row">
+                                <span className="benefit-label">Package</span>
+                                <span className="benefit-value">{product.rank_name || product.name}</span>
+                              </div>
+                              <div className="benefit-row highlight">
+                                <span className="benefit-label">Level Income</span>
+                                <span className="benefit-value total">10 levels</span>
+                              </div>
+                            </div>
+                            <p className="benefit-note">Activates your account · income from your team's purchases</p>
+                          </>
+                        ) : (
+                          <>
+                            <div className="benefit-details">
+                              <div className="benefit-row highlight">
+                                <span className="benefit-label">Repurchase Product</span>
+                                <span className="benefit-value total">Coming Soon</span>
+                              </div>
+                            </div>
+                            <p className="benefit-note">Buy as product for repurchase — repurchase coming soon</p>
+                          </>
+                        )}
                       </div>
 
                       {product.youtube_link && (
@@ -509,9 +569,9 @@ const Orders = () => {
                         <button
                           className="btn btn-primary btn-sm"
                           onClick={() => openPurchaseDialog(product)}
-                          disabled={!product.is_active}
+                          disabled={!product.is_active || allDesignsOutOfStock}
                         >
-                          {product.is_active ? 'Buy Now' : 'Unavailable'}
+                          {!product.is_active ? 'Unavailable' : allDesignsOutOfStock ? 'Out of Stock' : 'Buy Now'}
                         </button>
                       </div>
                     </div>
@@ -582,7 +642,7 @@ const Orders = () => {
             <EmptyState
               icon="📦"
               title="No orders yet"
-              description="Purchase your first rank package to activate your account and earn level income"
+              description="Purchase the Star package to activate your account and earn level income"
               action={{
                 label: 'Browse Products',
                 onClick: () => window.scrollTo({ top: 0, behavior: 'smooth' }),
@@ -606,6 +666,7 @@ const Orders = () => {
         isOpen={showPurchaseModal}
         onClose={closePurchaseModal}
         product={selectedProduct}
+        initialDesignIdx={selectedProduct ? (selectedDesigns[selectedProduct.id] ?? null) : null}
         onSuccess={handlePurchaseSuccess}
       />
 
@@ -1071,10 +1132,36 @@ const Orders = () => {
           color: white;
         }
 
+        .card-design-tab.out-of-stock {
+          opacity: 0.65;
+          text-decoration: line-through;
+        }
+
+        .card-design-oos {
+          display: inline-block;
+          margin-left: 0.3rem;
+          font-size: 0.6rem;
+          font-weight: 700;
+          color: #b91c1c;
+          text-decoration: none;
+        }
+
+        .card-design-tab.active .card-design-oos {
+          color: #fecaca;
+        }
+
+        .card-design-stock-msg {
+          padding: 0.35rem 1.25rem 0;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: #b91c1c;
+        }
+
         .card-design-desc {
           padding: 0.35rem 1.25rem 0;
           font-size: 0.75rem;
           color: var(--gray-500, #6b7280);
+          white-space: pre-line;
         }
 
         .card-design-video {
@@ -1091,6 +1178,24 @@ const Orders = () => {
           color: var(--gray-900);
           margin-bottom: 0.5rem;
         }
+
+        .qr-payments-card { margin-bottom: 1.5rem; }
+        .qr-payments-list { display: flex; flex-direction: column; gap: 0.6rem; padding: 0 1.25rem 1.25rem; }
+        .qr-payment-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 0.75rem;
+          padding: 0.75rem 0.9rem;
+          border: 1px solid var(--gray-200, #e5e7eb);
+          border-left: 4px solid #f59e0b;
+          border-radius: 10px;
+        }
+        .qr-payment-row.rejected { border-left-color: #dc2626; }
+        .qr-payment-main { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+        .qr-payment-main span { font-size: 0.82rem; color: var(--gray-600, #4b5563); overflow-wrap: anywhere; }
+        .qr-payment-reason { color: #b91c1c !important; }
+        .qr-payments-hint { padding: 0 1.25rem 1.25rem; margin: 0; font-size: 0.85rem; color: var(--gray-600, #4b5563); }
 
         .rank-chip {
           display: inline-block;

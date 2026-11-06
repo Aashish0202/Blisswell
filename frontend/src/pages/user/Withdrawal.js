@@ -7,6 +7,13 @@ import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
 import Pagination from '../../components/Pagination';
 
+// "07:00" -> "7:00 AM"
+const fmtTime = (hhmm) => {
+  const [h, m] = String(hhmm || '').split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm || '';
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+};
+
 const Withdrawal = () => {
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
@@ -128,13 +135,16 @@ const Withdrawal = () => {
 
   // Live withdrawal split preview (from /withdrawals/config)
   const adminChargePct = Number(wdConfig?.adminChargePercent ?? 0);
-  const repurchasePct = Number(wdConfig?.repurchaseSharePercent ?? 0);
   const wdAmt = parseFloat(withdrawAmount);
-  const splitPreview = (wdAmt > 0 && adminChargePct >= 0 && repurchasePct >= 0) ? {
-    payout: wdAmt * (1 - (adminChargePct + repurchasePct) / 100),
-    adminCharge: wdAmt * adminChargePct / 100,
-    repurchase: wdAmt * repurchasePct / 100
+  const splitPreview = (wdAmt > 0 && adminChargePct >= 0) ? {
+    payout: wdAmt * (1 - adminChargePct / 100),
+    adminCharge: wdAmt * adminChargePct / 100
   } : null;
+
+  // Withdrawal window (Friday only, admin-set times) — server decides isOpenNow.
+  const wdDay = wdConfig?.dayName || 'Friday';
+  const wdWindow = `${fmtTime(wdConfig?.startTime || '07:00')} – ${fmtTime(wdConfig?.endTime || '10:00')} IST`;
+  const windowOpen = wdConfig ? wdConfig.isOpenNow !== false : true;
 
   if (loading) {
     return (
@@ -171,8 +181,7 @@ const Withdrawal = () => {
             <strong>How Withdrawals Work</strong>
             <p>
               Request a withdrawal from your available earnings (min ₹200). At processing, {adminChargePct}% is
-              deducted as an admin charge and {repurchasePct}% is credited to your Repurchase Wallet (funding your
-              next rank upgrade) — you receive the remainder. Accepted only 7:00–10:00 AM IST.
+              deducted as an admin charge — you receive the remaining {100 - adminChargePct}%. Accepted only on {wdDay}, {wdWindow}.
             </p>
           </div>
         </div>
@@ -228,24 +237,25 @@ const Withdrawal = () => {
               <input
                 type="number" min="1" step="1" placeholder={kycApproved ? 'Amount (min ₹200)' : 'Complete KYC to withdraw'}
                 value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)}
-                disabled={requesting || !kycApproved}
+                disabled={requesting || !kycApproved || !windowOpen}
               />
-              <button type="submit" className="btn btn-primary" disabled={requesting || !kycApproved}>
-                {requesting ? 'Submitting…' : kycApproved ? 'Request Withdrawal' : 'KYC Required'}
+              <button type="submit" className="btn btn-primary" disabled={requesting || !kycApproved || !windowOpen}>
+                {requesting ? 'Submitting…' : !kycApproved ? 'KYC Required' : !windowOpen ? `Opens ${wdDay}` : 'Request Withdrawal'}
               </button>
             </div>
             {splitPreview && wdAmt >= 200 && (
               <div className="split-preview">
                 <div><span className="muted">You receive</span><strong className="split-payout">{fmt(splitPreview.payout)}</strong></div>
                 <div><span className="muted">Admin charge ({adminChargePct}%)</span><strong>{fmt(splitPreview.adminCharge)}</strong></div>
-                <div><span className="muted">Repurchase wallet ({repurchasePct}%)</span><strong>{fmt(splitPreview.repurchase)}</strong></div>
               </div>
             )}
             <p className="withdraw-note">
-              Withdrawals are accepted only between <strong>7:00 AM – 10:00 AM IST</strong>. Minimum ₹200.
+              {kycApproved && !windowOpen && (
+                <><strong>Withdrawals are closed right now.</strong> The next window opens on {wdDay}, {wdWindow}.<br /></>
+              )}
+              Withdrawals are accepted only on <strong>{wdDay}, {wdWindow}</strong>. Minimum ₹200.
               You must have at least <strong>{wdConfig?.minActiveDirects ?? 2} active direct referrals</strong> (directs with
-              an active product). At processing, {adminChargePct}% is deducted as an admin charge and {repurchasePct}% is
-              credited to your Repurchase Wallet (funds your next rank upgrade) — you receive the remainder.
+              an active product). At processing, {adminChargePct}% is deducted as an admin charge — you receive the remainder.
               {earnings.pendingWithdrawal > 0 && ' You already have a pending request — it must be processed first.'}
             </p>
           </form>
@@ -260,7 +270,7 @@ const Withdrawal = () => {
           {withdrawals.length > 0 ? (
             <div className="table-container">
               <table className="table">
-                <thead><tr><th>Date</th><th>Amount</th><th>You Receive</th><th>Admin Charge</th><th>Repurchase</th><th>Status</th><th>Processed At</th><th>Reason</th></tr></thead>
+                <thead><tr><th>Date</th><th>Amount</th><th>You Receive</th><th>Admin Charge</th><th>Status</th><th>Processed At</th><th>Reason</th></tr></thead>
                 <tbody>
                   {withdrawals.map((w) => (
                     <tr key={w.id}>
@@ -268,7 +278,6 @@ const Withdrawal = () => {
                       <td className="text-primary font-semibold">{fmt(w.amount)}</td>
                       <td className="font-semibold">{w.status === 'processed' ? fmt(w.payout_amount) : '—'}</td>
                       <td className="text-muted">{w.status === 'processed' ? fmt(w.admin_charge) : '—'}</td>
-                      <td className="text-muted">{w.status === 'processed' ? fmt(w.repurchase_amount) : '—'}</td>
                       <td>{wdStatusBadge(w.status)}</td>
                       <td className="text-muted datetime-cell">{formatDateTime(w.processed_at)}</td>
                       <td className="text-muted">{w.reject_reason || '-'}</td>

@@ -6,20 +6,21 @@ const WalletTransaction = require('../models/WalletTransaction');
 const WithdrawalRequest = require('../models/WithdrawalRequest');
 const User = require('../models/User');
 const KYC = require('../models/KYC');
-const autoRepurchaseService = require('./autoRepurchaseService');
-const { isWithinWithdrawalWindow } = require('../utils/time');
+const { isWithinWithdrawalWindow, isWithdrawalDay, WITHDRAWAL_WEEKDAY, DAY_NAMES } = require('../utils/time');
+
+const WITHDRAWAL_DAY_NAME = DAY_NAMES[WITHDRAWAL_WEEKDAY];
 
 // A user may withdraw only after building a minimum team: this many direct
 // referrals with an active product.
 const MIN_ACTIVE_DIRECTS = 2;
 
-// Withdrawal business logic. User-initiated, min ₹200, 7–10 AM IST window.
+// Withdrawal business logic. User-initiated, min ₹200, Fridays only within
+// the admin-set time window (default 7–10 AM IST).
 // On processing, the requested amount splits:
 //   - admin charge  (settings withdrawal_admin_charge_percent, company)
-//   - repurchase    (settings repurchase_share_percent, credited to the
-//                    user's repurchase wallet, spent by the auto-repurchase
-//                    engine on rank upgrades)
 //   - payout        (the remainder, paid to the user)
+// The repurchase-wallet share was retired; repurchase_amount is recorded
+// as 0 on new withdrawals and kept only for legacy rows.
 class WithdrawalError extends Error {
   constructor(statusCode, message, code) {
     super(message);
@@ -32,13 +33,12 @@ const round2 = (v) => Math.round(v * 100) / 100;
 
 const withdrawalService = {
   // Split of a withdrawal amount at processing time. The payout is the
-  // remainder so rounding never drifts across the three parts.
+  // remainder so rounding never drifts.
   computeSplit(amount, settings) {
     const amt = parseFloat(amount);
     const adminCharge = round2(amt * (settings.withdrawal.adminChargePercent || 0) / 100);
-    const repurchaseAmount = round2(amt * (settings.withdrawal.repurchaseSharePercent || 0) / 100);
-    const payout = round2(amt - adminCharge - repurchaseAmount);
-    return { adminCharge, repurchaseAmount, payout };
+    const payout = round2(amt - adminCharge);
+    return { adminCharge, payout };
   },
 
   // Read-only config for the frontend's withdrawal form preview.
@@ -49,10 +49,12 @@ const withdrawalService = {
       startTime: settings.withdrawal.startTime,
       endTime: settings.withdrawal.endTime,
       timezone: settings.withdrawal.timezone,
+      weekday: WITHDRAWAL_WEEKDAY,
+      dayName: WITHDRAWAL_DAY_NAME,
+      // Server-computed so the client never trusts its own clock/timezone.
+      isOpenNow: isWithdrawalDay() && isWithinWithdrawalWindow(settings.withdrawal.startTime, settings.withdrawal.endTime),
       adminChargePercent: settings.withdrawal.adminChargePercent,
-      repurchaseSharePercent: settings.withdrawal.repurchaseSharePercent,
-      minActiveDirects: MIN_ACTIVE_DIRECTS,
-      autoRepurchaseEnabled: settings.autoRepurchase.enabled
+      minActiveDirects: MIN_ACTIVE_DIRECTS
     };
   },
   // User requests a withdrawal. Earnings are held (debited) immediately and
@@ -66,10 +68,17 @@ const withdrawalService = {
     const settings = await Settings.getIncomeSettings();
     const { minAmount, startTime, endTime } = settings.withdrawal;
 
+    if (!isWithdrawalDay()) {
+      throw new WithdrawalError(
+        403,
+        `Withdrawals are only accepted on ${WITHDRAWAL_DAY_NAME}, between ${startTime} and ${endTime} IST.`,
+        'OUTSIDE_DAY'
+      );
+    }
     if (!isWithinWithdrawalWindow(startTime, endTime)) {
       throw new WithdrawalError(
         403,
-        `Withdrawals are only accepted between ${startTime} and ${endTime} IST.`,
+        `Withdrawals are only accepted on ${WITHDRAWAL_DAY_NAME}, between ${startTime} and ${endTime} IST.`,
         'OUTSIDE_WINDOW'
       );
     }
@@ -180,9 +189,8 @@ const withdrawalService = {
     }
   },
 
-  // Admin marks a pending withdrawal as processed (paid out). Records the
-  // split ledger, credits the repurchase share, and hands the user to the
-  // auto-repurchase engine afterwards (the cron sweep is the recovery path).
+  // Admin marks a pending withdrawal as processed (paid out) and records
+  // the admin-charge / payout split ledger.
   async processWithdrawal(adminId, id) {
     const conn = await pool.getConnection();
     let wr;
@@ -200,41 +208,18 @@ const withdrawalService = {
       }
 
       const settings = await Settings.getIncomeSettings();
-      const { adminCharge, repurchaseAmount, payout } = this.computeSplit(wr.amount, settings);
+      const { adminCharge, payout } = this.computeSplit(wr.amount, settings);
 
       await WithdrawalRequest.updateStatus(id, 'processed', {
         processed_by: adminId,
         processed_at: new Date(),
         admin_charge: adminCharge,
-        repurchase_amount: repurchaseAmount,
+        repurchase_amount: 0,
         payout_amount: payout
       }, conn);
       await WalletTransaction.updateStatus(wr.transaction_id, 'completed');
 
-      // Credit the repurchase share to the user's repurchase wallet.
-      if (repurchaseAmount > 0) {
-        const repRef = `WRC-${id}`;
-        await WalletTransaction.create({
-          user_id: wr.user_id,
-          type: 'repurchase',
-          amount: repurchaseAmount,
-          status: 'completed',
-          reference_key: repRef,
-          description: `Repurchase wallet credit from withdrawal #${id}`
-        }, conn);
-        await Wallet.addRepurchase(wr.user_id, repurchaseAmount, conn);
-      }
-
       await conn.commit();
-
-      // Fire-and-forget: run the auto-repurchase engine for this user AFTER
-      // the commit (never inside this transaction — the engine re-locks the
-      // same wallet row). The cron sweep recovers any failure here.
-      const userId = wr.user_id;
-      setImmediate(() => {
-        autoRepurchaseService.processUser(userId, { sourceWithdrawalId: id })
-          .catch(err => console.error(`[autoRepurchase] post-withdrawal run failed for user ${userId}:`, err.message));
-      });
 
       return await WithdrawalRequest.getById(id);
     } catch (error) {

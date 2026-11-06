@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { userAPI } from '../../utils/api';
+import { userAPI, memberAPI } from '../../utils/api';
 import DashboardLayout from '../../components/DashboardLayout';
 import EmptyState from '../../components/EmptyState';
 import LoadingSkeleton from '../../components/LoadingSkeleton';
@@ -12,30 +12,29 @@ const Earnings = () => {
   const [loading, setLoading] = useState(true);
 
   const [earnings, setEarnings] = useState({
-    totalEarnings: 0, teamIncomeTotal: 0,
+    totalEarnings: 0, teamIncomeTotal: 0, rewardIncomeTotal: 0,
     availableForWithdrawal: 0, totalWithdrawn: 0, pendingWithdrawal: 0
   });
   const [teamIncome, setTeamIncome] = useState({
-    totalEarned: 0,
-    earnedFromPurchases: 0, earnedFromRepurchases: 0, ranks: []
+    totalEarned: 0, ranks: []
   });
+  const [rewardPlans, setRewardPlans] = useState([]);
 
   const [events, setEvents] = useState([]);
   const [eventsPage, setEventsPage] = useState(1);
   const [eventsTotalPages, setEventsTotalPages] = useState(1);
   const [eventsTotal, setEventsTotal] = useState(0);
-  // Source filter for team income history: '' = all, 'purchase', 'repurchase'
-  const [eventsSource, setEventsSource] = useState('');
-  const [eventTotals, setEventTotals] = useState({ purchase: 0, purchaseCount: 0, repurchase: 0, repurchaseCount: 0 });
 
   const fetchCore = useCallback(async () => {
     try {
-      const [earnRes, tiRes] = await Promise.all([
+      const [earnRes, tiRes, rwRes] = await Promise.all([
         userAPI.getEarnings().catch(() => null),
-        userAPI.getTeamIncome().catch(() => null)
+        userAPI.getTeamIncome().catch(() => null),
+        memberAPI.getRewards().catch(() => null)
       ]);
       if (earnRes?.data?.earnings) setEarnings(earnRes.data.earnings);
       if (tiRes?.data?.teamIncome) setTeamIncome(tiRes.data.teamIncome);
+      if (rwRes?.data?.plans) setRewardPlans(rwRes.data.plans);
     } catch (e) {
       toast.error('Failed to load earnings data');
     } finally {
@@ -43,23 +42,17 @@ const Earnings = () => {
     }
   }, []);
 
-  const fetchEvents = useCallback(async (page, source = eventsSource) => {
+  const fetchEvents = useCallback(async (page) => {
     try {
-      const res = await userAPI.getTeamIncomeHistory(page, source);
+      const res = await userAPI.getTeamIncomeHistory(page);
       setEvents(res.data.events || []);
       setEventsTotal(res.data.total || 0);
       setEventsTotalPages(res.data.totalPages || 1);
-      if (res.data.totals) setEventTotals(res.data.totals);
     } catch (e) { /* ignore */ }
-  }, [eventsSource]);
+  }, []);
 
   useEffect(() => { fetchCore(); }, [fetchCore]);
   useEffect(() => { fetchEvents(eventsPage); }, [eventsPage, fetchEvents]);
-  const handleEventsSource = (source) => {
-    setEventsSource(source);
-    setEventsPage(1);
-    fetchEvents(1, source);
-  };
 
   const fmt = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
   const formatDateTime = (d) => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
@@ -71,12 +64,13 @@ const Earnings = () => {
           <div className="page-header">
             <div>
               <h1 className="page-title">Earnings</h1>
-              <p className="page-subtitle">Team Income Overview</p>
+              <p className="page-subtitle">Level Income &amp; Reward Income Overview</p>
             </div>
           </div>
           <div className="stats-grid">
             <LoadingSkeleton variant="stat" /><LoadingSkeleton variant="stat" />
             <LoadingSkeleton variant="stat" /><LoadingSkeleton variant="stat" />
+            <LoadingSkeleton variant="stat" />
           </div>
         </div>
       </DashboardLayout>
@@ -89,7 +83,7 @@ const Earnings = () => {
         <div className="page-header">
           <div>
             <h1 className="page-title">Earnings</h1>
-            <p className="page-subtitle">Team Income Overview</p>
+            <p className="page-subtitle">Level Income &amp; Reward Income Overview</p>
           </div>
           <Link to="/withdrawal" className="btn btn-primary">
             <span>🏦</span> Go to Withdrawal
@@ -102,7 +96,8 @@ const Earnings = () => {
           <div className="info-content">
             <strong>How Earnings Work</strong>
             <p>
-              <strong>Level Income:</strong> When your downline purchases, you earn per the purchaser's rank table — all 10 levels per rank (Star, Silver, Gold, Platinum), as long as your own package is active. You also earn again when your downline's Repurchase Wallet auto-buys their next rank.
+              <strong>Level Income:</strong> When your downline purchases the package, you earn level income across up to {teamIncome.maxLevels || 10} levels, as long as your own package is active.
+              <strong>Reward Income:</strong> One-time milestone rewards (Bike Fund, Car Fund) credited when your team reaches the required active members. See <Link to="/rewards">Rewards</Link> for your progress.
               &nbsp;Head to the <Link to="/withdrawal">Withdrawal page</Link> to cash out your available earnings.
             </p>
           </div>
@@ -114,7 +109,7 @@ const Earnings = () => {
             <div className="stat-icon">📊</div>
             <div className="stat-label">Total Earnings</div>
             <div className="stat-value">{fmt(earnings.totalEarnings)}</div>
-            <div className="stat-subtext">Level income (purchases + repurchases)</div>
+            <div className="stat-subtext">Level + reward income</div>
           </div>
           <div className="stat-card info">
             <div className="stat-icon">👥</div>
@@ -122,6 +117,12 @@ const Earnings = () => {
             <div className="stat-value">{fmt(earnings.teamIncomeTotal)}</div>
             <div className="stat-subtext">From downline purchases</div>
           </div>
+          <Link to="/rewards" className="stat-card reward">
+            <div className="stat-icon">🏆</div>
+            <div className="stat-label">Reward Income</div>
+            <div className="stat-value">{fmt(earnings.rewardIncomeTotal)}</div>
+            <div className="stat-subtext">Bike &amp; Car Fund →</div>
+          </Link>
           <Link to="/withdrawal" className="stat-card">
             <div className="stat-icon">🏦</div>
             <div className="stat-label">Available for Withdrawal</div>
@@ -145,26 +146,8 @@ const Earnings = () => {
             <div className="team-summary">
               <div><span className="muted">Total Earned</span><strong>{fmt(teamIncome.totalEarned)}</strong></div>
             </div>
-            <div className="income-breakdown">
-              <div className="breakdown-cell">
-                <span className="breakdown-icon">🛒</span>
-                <div>
-                  <span className="muted">From Purchases</span>
-                  <strong>{fmt(teamIncome.earnedFromPurchases)}</strong>
-                  <span className="breakdown-sub">downline product orders</span>
-                </div>
-              </div>
-              <div className="breakdown-cell breakdown-cell-repurchase">
-                <span className="breakdown-icon">🔄</span>
-                <div>
-                  <span className="muted">From Repurchases</span>
-                  <strong>{fmt(teamIncome.earnedFromRepurchases)}</strong>
-                  <span className="breakdown-sub">auto rank upgrades of downline</span>
-                </div>
-              </div>
-            </div>
             <p className="team-note">
-              Each rank below shows the income you earn per level (L1–L10) when a downline member purchases that rank.
+              Below is the income you earn per level (L1–L{teamIncome.maxLevels || 10}) when a downline member purchases the package.
               Every level is always active — the only requirement is that your own package stays active.
             </p>
             {(teamIncome.ranks || []).map((rank) => (
@@ -189,38 +172,60 @@ const Earnings = () => {
           </div>
         </div>
 
+        {/* Reward income — one row per milestone plan */}
+        {rewardPlans.length > 0 && (
+          <div className="card fade-in earnings-card">
+            <div className="card-header">
+              <h3 className="card-title">🏆 Reward Income</h3>
+              <Link to="/rewards" className="btn btn-ghost btn-sm">View Progress →</Link>
+            </div>
+            <div className="table-container">
+              <table className="table">
+                <thead><tr><th>Reward</th><th>Amount</th><th>Progress</th><th>Status</th><th>Paid On</th></tr></thead>
+                <tbody>
+                  {rewardPlans.map((p) => {
+                    const st = p.status === 'PAID' ? { cls: 'badge-success', label: 'Paid' }
+                      : p.awaiting_activation || p.status === 'ACHIEVED' ? { cls: 'badge-warning', label: 'Achieved · awaiting activation' }
+                      : p.status === 'LOCKED' ? { cls: 'badge-neutral', label: 'Locked' }
+                      : { cls: 'badge-info', label: 'In progress' };
+                    const pct = p.status === 'PAID' ? 100 : Math.min(100, Number(p.progress_pct) || 0);
+                    return (
+                      <tr key={p.id}>
+                        <td>
+                          <span className="font-medium">{p.icon === 'car' ? '🚗' : p.icon === 'bike' ? '🏍️' : '🎁'} {p.name}</span>
+                          {p.matrix_label && <span className="text-muted" style={{ fontSize: '0.75rem' }}> ({p.matrix_label})</span>}
+                        </td>
+                        <td className={p.status === 'PAID' ? 'text-primary font-semibold' : ''}>{fmt(p.status === 'PAID' ? (p.paid_amount ?? p.reward_amount) : p.reward_amount)}</td>
+                        <td style={{ minWidth: 120 }}>
+                          <div className="rw-progress"><div className="rw-progress-bar" style={{ width: `${pct}%` }} /></div>
+                          <span className="text-muted" style={{ fontSize: '0.7rem' }}>{pct.toFixed(pct < 10 && pct > 0 ? 2 : 0)}%</span>
+                        </td>
+                        <td><span className={`badge ${st.cls}`}>{st.label}</span></td>
+                        <td>{p.paid_at ? formatDateTime(p.paid_at) : '-'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         {/* Team income history */}
         <div className="card fade-in">
           <div className="card-header">
             <h3 className="card-title">Team Income Events</h3>
             {eventsTotal > 0 && <span className="badge badge-neutral">{eventsTotal} Events</span>}
           </div>
-          {/* Income breakdown strip */}
-          <div className="event-breakdown">
-            <button className={`breakdown-pill ${eventsSource === '' ? 'active' : ''}`} onClick={() => handleEventsSource('')}>
-              All Income <strong>{fmt(eventTotals.purchase + eventTotals.repurchase)}</strong>
-            </button>
-            <button className={`breakdown-pill breakdown-pill-purchase ${eventsSource === 'purchase' ? 'active' : ''}`} onClick={() => handleEventsSource('purchase')}>
-              🛒 Purchases <strong>{fmt(eventTotals.purchase)}</strong>
-              <span className="pill-count">{eventTotals.purchaseCount}</span>
-            </button>
-            <button className={`breakdown-pill breakdown-pill-repurchase ${eventsSource === 'repurchase' ? 'active' : ''}`} onClick={() => handleEventsSource('repurchase')}>
-              🔄 Repurchases <strong>{fmt(eventTotals.repurchase)}</strong>
-              <span className="pill-count">{eventTotals.repurchaseCount}</span>
-            </button>
-          </div>
           {events.length > 0 ? (
             <div className="table-container">
               <table className="table">
-                <thead><tr><th>Date</th><th>Purchaser</th><th>Source</th><th>Rank</th><th>Level</th><th>Amount</th></tr></thead>
+                <thead><tr><th>Date</th><th>Purchaser</th><th>Package</th><th>Level</th><th>Amount</th></tr></thead>
                 <tbody>
                   {events.map((ev) => (
                     <tr key={ev.id}>
                       <td>{formatDateTime(ev.created_at)}</td>
                       <td className="font-medium">{ev.purchaser_name}</td>
-                      <td>{ev.order_source === 'auto_repurchase'
-                        ? <span className="source-badge source-repurchase">🔄 Repurchase</span>
-                        : <span className="source-badge source-purchase">🛒 Purchase</span>}</td>
                       <td>{ev.rank_name ? <span className={rankBadgeClass(ev.rank_name)}>{ev.rank_name}</span> : '-'}</td>
                       <td><span className="period-badge">Level {ev.level}</span></td>
                       <td className="text-primary font-semibold">{fmt(ev.amount)}</td>
@@ -230,7 +235,7 @@ const Earnings = () => {
               </table>
             </div>
           ) : (
-            <EmptyState icon="👥" title="No team income yet" description="When your downline purchases a product (or auto-repurchases to a higher rank), your team income will appear here." />
+            <EmptyState icon="👥" title="No team income yet" description="When your downline purchases the package, your team income will appear here." />
           )}
           {eventsTotal > 0 && <Pagination page={eventsPage} totalPages={eventsTotalPages} total={eventsTotal} onChange={setEventsPage} />}
         </div>
@@ -256,6 +261,11 @@ const Earnings = () => {
         a.stat-card { display:block; text-decoration:none; color:inherit; }
 
         .earnings-card { margin-bottom:1.5rem; }
+        .stat-card.reward { background:linear-gradient(135deg,#B18B36,#073C39); border:none; }
+        .stat-card.reward .stat-label,.stat-card.reward .stat-value,
+        .stat-card.reward .stat-subtext,.stat-card.reward .stat-icon { color:white; }
+        .rw-progress { height:6px; background:var(--gray-100); border-radius:999px; overflow:hidden; margin-bottom:0.15rem; }
+        .rw-progress-bar { height:100%; background:linear-gradient(90deg,#CFAA57,#B18B36); border-radius:999px; }
 
         .team-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:1rem; margin-bottom:1rem; }
         .team-summary div { display:flex; flex-direction:column; }
