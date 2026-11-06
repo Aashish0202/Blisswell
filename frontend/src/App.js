@@ -93,7 +93,7 @@ const AppLayout = ({ children }) => {
 
   // Pages that use app layout (no header/footer)
   const appPages = [
-    '/dashboard', '/wallet', '/orders', '/referrals', '/earnings', '/withdrawal', '/profile', '/support', '/id-card',
+    '/dashboard', '/wallet', '/orders', '/referrals', '/earnings', '/withdrawal', '/profile', '/support', '/id-card', '/rewards',
     '/change-password', '/admin', '/admin/users', '/admin/orders', '/admin/products',
     '/admin/withdrawals', '/admin/reports', '/admin/settings', '/admin/wallet-deposit', '/admin/tickets',
     '/admin/gallery', '/admin/offer-banners'
